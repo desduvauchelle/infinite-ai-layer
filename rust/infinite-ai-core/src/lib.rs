@@ -1,4 +1,9 @@
-use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use futures_core::Stream;
@@ -758,6 +763,10 @@ pub trait ProviderAdapter: Send + Sync {
     ) -> Result<TranscriptionResult, AiError> {
         Err(unsupported(&request.model, Capability::Transcription))
     }
+
+    async fn run_agent(&self, request: AgentRequest) -> Result<AgentEventStream, AiError> {
+        Err(unsupported(&request.agent, Capability::AgentExecution))
+    }
 }
 
 #[async_trait]
@@ -781,6 +790,7 @@ fn unsupported(model: &ModelRef, capability: Capability) -> AiError {
 #[derive(Default)]
 pub struct AiClient {
     adapters: HashMap<String, Arc<dyn ProviderAdapter>>,
+    models: Mutex<HashMap<String, HashMap<String, ModelInfo>>>,
 }
 
 // Normalized errors intentionally carry portable provider metadata; boxing them would make every
@@ -813,6 +823,9 @@ impl AiClient {
     }
 
     pub fn unregister(&mut self, connection_id: &str) -> bool {
+        if let Ok(mut models) = self.models.lock() {
+            models.remove(connection_id);
+        }
         self.adapters.remove(connection_id).is_some()
     }
 
@@ -828,7 +841,18 @@ impl AiClient {
     }
 
     pub async fn list_models(&self, connection_id: &str) -> Result<Vec<ModelInfo>, AiError> {
-        self.adapter(connection_id)?.list_models().await
+        let models = self.adapter(connection_id)?.list_models().await?;
+        if let Ok(mut cache) = self.models.lock() {
+            cache.insert(
+                connection_id.to_string(),
+                models
+                    .iter()
+                    .cloned()
+                    .map(|model| (model.id.clone(), model))
+                    .collect(),
+            );
+        }
+        Ok(models)
     }
 
     pub async fn generate_text(&self, request: TextRequest) -> Result<TextResult, AiError> {
@@ -907,6 +931,29 @@ impl AiClient {
         adapter.transcribe(request).await
     }
 
+    pub async fn run_agent(&self, request: AgentRequest) -> Result<AgentEventStream, AiError> {
+        if request.prompt.trim().is_empty() {
+            return Err(
+                AiError::new(ErrorCode::InvalidRequest, "An agent prompt is required.")
+                    .for_model(&request.agent),
+            );
+        }
+        if request.workspace.trim().is_empty() || !is_absolute_workspace(&request.workspace) {
+            return Err(AiError::new(
+                ErrorCode::InvalidRequest,
+                "The agent workspace must be an absolute path.",
+            )
+            .for_model(&request.agent));
+        }
+        ensure_not_cancelled(&request.agent, request.cancellation.as_ref())?;
+        let adapter = self.preflight(
+            &request.agent,
+            request.maximum_boundary,
+            Capability::AgentExecution,
+        )?;
+        adapter.run_agent(request).await
+    }
+
     pub async fn collect_text(&self, request: TextRequest) -> Result<TextResult, AiError> {
         let model = request.model.clone();
         let request_id = request.resolved_request_id();
@@ -982,6 +1029,7 @@ impl AiClient {
         if !adapter.connection().capabilities.contains(&capability) {
             return Err(unsupported(model, capability));
         }
+        self.assert_model_capability(adapter.as_ref(), model, capability)?;
         Ok(adapter)
     }
 
@@ -1046,13 +1094,8 @@ impl AiClient {
                     )
                 })
             });
-        if uses_tools
-            && !adapter
-                .connection()
-                .capabilities
-                .contains(&Capability::ToolCalling)
-        {
-            return Err(unsupported(&request.model, Capability::ToolCalling));
+        if uses_tools {
+            self.assert_capability(adapter.as_ref(), &request.model, Capability::ToolCalling)?;
         }
         if request.tool_choice.is_some() && request.tools.is_empty() {
             return Err(AiError::new(
@@ -1076,13 +1119,12 @@ impl AiClient {
             .flat_map(|message| message.content.iter())
         {
             match part {
-                ContentPart::Image { .. }
-                    if !adapter
-                        .connection()
-                        .capabilities
-                        .contains(&Capability::ImageUnderstanding) =>
-                {
-                    return Err(unsupported(&request.model, Capability::ImageUnderstanding));
+                ContentPart::Image { .. } => {
+                    self.assert_capability(
+                        adapter.as_ref(),
+                        &request.model,
+                        Capability::ImageUnderstanding,
+                    )?;
                 }
                 ContentPart::Audio { .. } | ContentPart::File { .. } => {
                     return Err(AiError::new(
@@ -1096,6 +1138,57 @@ impl AiClient {
         }
         Ok(adapter)
     }
+
+    fn assert_capability(
+        &self,
+        adapter: &dyn ProviderAdapter,
+        model: &ModelRef,
+        capability: Capability,
+    ) -> Result<(), AiError> {
+        if !adapter.connection().capabilities.contains(&capability) {
+            return Err(unsupported(model, capability));
+        }
+        self.assert_model_capability(adapter, model, capability)
+    }
+
+    fn assert_model_capability(
+        &self,
+        adapter: &dyn ProviderAdapter,
+        model: &ModelRef,
+        capability: Capability,
+    ) -> Result<(), AiError> {
+        let cache = match self.models.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let Some(info) = cache
+            .get(&adapter.connection().id)
+            .and_then(|models| models.get(&model.model_id))
+        else {
+            return Ok(());
+        };
+        if info.capabilities.is_empty() || info.capabilities.contains(&capability) {
+            return Ok(());
+        }
+        Err(AiError::new(
+            ErrorCode::UnsupportedCapability,
+            format!(
+                "Model '{}' on connection '{}' does not support {capability:?}.",
+                model.model_id, model.connection_id
+            ),
+        )
+        .for_model(model))
+    }
+}
+
+fn is_absolute_workspace(workspace: &str) -> bool {
+    let value = workspace.trim();
+    value.starts_with('/')
+        || value.starts_with('\\')
+        || (value.len() >= 3
+            && value.as_bytes()[0].is_ascii_alphabetic()
+            && value.as_bytes()[1] == b':'
+            && (value.as_bytes()[2] == b'\\' || value.as_bytes()[2] == b'/'))
 }
 
 #[allow(clippy::result_large_err)]
@@ -1286,6 +1379,117 @@ mod tests {
         );
         let error = client.generate_text(request).await.unwrap_err();
         assert_eq!(error.code, ErrorCode::UnsupportedCapability);
+    }
+
+    #[tokio::test]
+    async fn listed_chat_model_cannot_embed() {
+        let mut adapter = MockAdapter::new("mock");
+        adapter.connection.capabilities.push(Capability::Embeddings);
+        let mut client = AiClient::new();
+        client.register(Arc::new(adapter)).unwrap();
+        client.list_models("mock").await.unwrap();
+        let error = client
+            .embed(EmbeddingRequest {
+                model: ModelRef {
+                    connection_id: "mock".into(),
+                    model_id: "fixture-chat".into(),
+                },
+                input: vec!["hello".into()],
+                input_mode: None,
+                timeout_ms: None,
+                maximum_boundary: None,
+                cancellation: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::UnsupportedCapability);
+    }
+
+    struct AgentMock {
+        connection: ConnectionInfo,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for AgentMock {
+        fn connection(&self) -> &ConnectionInfo {
+            &self.connection
+        }
+
+        async fn health(&self) -> Result<HealthResult, AiError> {
+            Ok(HealthResult {
+                available: true,
+                reason: AvailabilityReason::Available,
+                message: "ok".into(),
+                checked_at: "1970-01-01T00:00:00Z".into(),
+                latency_ms: Some(0),
+            })
+        }
+
+        async fn list_models(&self) -> Result<Vec<ModelInfo>, AiError> {
+            Ok(Vec::new())
+        }
+
+        async fn run_agent(&self, request: AgentRequest) -> Result<AgentEventStream, AiError> {
+            Ok(Box::pin(async_stream::try_stream! {
+                yield AgentEvent::Start {
+                    request_id: "req".into(),
+                    agent: request.agent.clone(),
+                    workspace: request.workspace.clone(),
+                };
+                yield AgentEvent::Finish {
+                    reason: FinishReason::Stop,
+                    usage: None,
+                };
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn run_agent_uses_connection_preflight() {
+        let mut client = AiClient::new();
+        client
+            .register(Arc::new(AgentMock {
+                connection: ConnectionInfo {
+                    id: "agent".into(),
+                    adapter_id: "mock-agent".into(),
+                    label: "Agent".into(),
+                    boundary: DataBoundary::Device,
+                    capabilities: vec![
+                        Capability::ProviderHealth,
+                        Capability::ModelListing,
+                        Capability::AgentExecution,
+                    ],
+                },
+            }))
+            .unwrap();
+        let mut stream = client
+            .run_agent(AgentRequest::new(
+                ModelRef {
+                    connection_id: "agent".into(),
+                    model_id: "default".into(),
+                },
+                "Inspect",
+                "/tmp",
+            ))
+            .await
+            .unwrap();
+        let first = stream.next().await.unwrap().unwrap();
+        assert!(matches!(first, AgentEvent::Start { .. }));
+        let error = match client
+            .run_agent(AgentRequest::new(
+                ModelRef {
+                    connection_id: "agent".into(),
+                    model_id: "default".into(),
+                },
+                "Inspect",
+                "relative",
+            ))
+            .await
+        {
+            Ok(_) => panic!("relative workspace should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
     }
 
     #[test]

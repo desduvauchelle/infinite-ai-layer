@@ -1,6 +1,8 @@
 import type { ProviderAdapter } from "./adapter.js";
 import { AiError } from "./errors.js";
 import type {
+  AgentEvent,
+  AgentRequest,
   Capability,
   ConnectionInfo,
   DataBoundary,
@@ -37,8 +39,17 @@ export interface ObserverEvent {
 
 export type Observer = (event: ObserverEvent) => void;
 
+function isAbsoluteWorkspace(workspace: string): boolean {
+  return (
+    workspace.startsWith("/") ||
+    workspace.startsWith("\\") ||
+    /^[A-Za-z]:[\\/]/.test(workspace)
+  );
+}
+
 export class AiClient {
   readonly #adapters = new Map<string, ProviderAdapter>();
+  readonly #models = new Map<string, Map<string, ModelInfo>>();
   readonly #observer?: Observer;
 
   constructor(
@@ -76,6 +87,7 @@ export class AiClient {
   }
 
   unregister(connectionId: string): boolean {
+    this.#models.delete(connectionId);
     return this.#adapters.delete(connectionId);
   }
 
@@ -90,7 +102,12 @@ export class AiClient {
   }
 
   async listModels(connectionId: string): Promise<ModelInfo[]> {
-    return this.#adapter(connectionId).listModels();
+    const models = await this.#adapter(connectionId).listModels();
+    this.#models.set(
+      connectionId,
+      new Map(models.map((model) => [model.id, model])),
+    );
+    return models;
   }
 
   async generateText(request: TextRequest): Promise<TextResult> {
@@ -200,6 +217,82 @@ export class AiClient {
     );
   }
 
+  async *runAgent(request: AgentRequest): AsyncIterable<AgentEvent> {
+    const context: RequestContext = { ...request, model: request.agent };
+    if (request.prompt.trim() === "") {
+      throw new AiError("invalid-request", "An agent prompt is required.", {
+        connectionId: request.agent.connectionId,
+        modelId: request.agent.modelId,
+      });
+    }
+    if (request.workspace.trim() === "") {
+      throw new AiError(
+        "invalid-request",
+        "The agent workspace must be an absolute path.",
+        {
+          connectionId: request.agent.connectionId,
+          modelId: request.agent.modelId,
+        },
+      );
+    }
+    if (!isAbsoluteWorkspace(request.workspace)) {
+      throw new AiError(
+        "invalid-request",
+        "The agent workspace must be an absolute path.",
+        {
+          connectionId: request.agent.connectionId,
+          modelId: request.agent.modelId,
+        },
+      );
+    }
+    const adapter = this.#preflight(context, "agent-execution");
+    if (adapter.runAgent === undefined)
+      this.#unsupported(context, "agent-execution");
+    const started = performance.now();
+    this.#observer?.({
+      type: "request-start",
+      operation: "runAgent",
+      connectionId: request.agent.connectionId,
+      modelId: request.agent.modelId,
+      ...(request.requestId === undefined
+        ? {}
+        : { requestId: request.requestId }),
+    });
+    try {
+      for await (const event of adapter.runAgent!(request)) yield event;
+      this.#observer?.({
+        type: "request-finish",
+        operation: "runAgent",
+        connectionId: request.agent.connectionId,
+        modelId: request.agent.modelId,
+        durationMs: performance.now() - started,
+        ...(request.requestId === undefined
+          ? {}
+          : { requestId: request.requestId }),
+      });
+    } catch (error) {
+      const normalized =
+        error instanceof AiError
+          ? error
+          : new AiError(
+              "provider-error",
+              error instanceof Error ? error.message : "Agent request failed.",
+            );
+      this.#observer?.({
+        type: "request-error",
+        operation: "runAgent",
+        connectionId: request.agent.connectionId,
+        modelId: request.agent.modelId,
+        durationMs: performance.now() - started,
+        errorCode: normalized.code,
+        ...(request.requestId === undefined
+          ? {}
+          : { requestId: request.requestId }),
+      });
+      throw normalized;
+    }
+  }
+
   #adapter(connectionId: string): ProviderAdapter {
     const adapter = this.#adapters.get(connectionId);
     if (adapter === undefined) {
@@ -262,6 +355,7 @@ export class AiClient {
     }
     if (!adapter.connection.capabilities.includes(capability))
       this.#unsupported(request, capability);
+    this.#assertModelCapability(adapter, request, capability);
     return adapter;
   }
 
@@ -306,8 +400,6 @@ export class AiClient {
       );
     }
     const adapter = this.#preflight(request, capability);
-    const supportsTools =
-      adapter.connection.capabilities.includes("tool-calling");
     if (
       (request.tools?.length ?? 0) > 0 ||
       request.toolChoice !== undefined ||
@@ -317,7 +409,7 @@ export class AiClient {
         ),
       )
     ) {
-      if (!supportsTools) this.#unsupported(request, "tool-calling");
+      this.#assertCapability(adapter, request, "tool-calling");
     }
     if (
       request.toolChoice !== undefined &&
@@ -352,8 +444,7 @@ export class AiClient {
     for (const message of request.messages) {
       for (const part of message.content) {
         if (part.type === "image") {
-          if (!adapter.connection.capabilities.includes("image-understanding"))
-            this.#unsupported(request, "image-understanding");
+          this.#assertCapability(adapter, request, "image-understanding");
           continue;
         }
         if (part.type === "audio" || part.type === "file") {
@@ -369,6 +460,37 @@ export class AiClient {
       }
     }
     return adapter;
+  }
+
+  #assertCapability(
+    adapter: ProviderAdapter,
+    request: RequestContext,
+    capability: Capability,
+  ): void {
+    if (!adapter.connection.capabilities.includes(capability))
+      this.#unsupported(request, capability);
+    this.#assertModelCapability(adapter, request, capability);
+  }
+
+  #assertModelCapability(
+    adapter: ProviderAdapter,
+    request: RequestContext,
+    capability: Capability,
+  ): void {
+    const known = this.#models
+      .get(adapter.connection.id)
+      ?.get(request.model.modelId);
+    if (known === undefined || known.capabilities.length === 0) return;
+    if (!known.capabilities.includes(capability)) {
+      throw new AiError(
+        "unsupported-capability",
+        `Model '${request.model.modelId}' on connection '${request.model.connectionId}' does not support ${capability}.`,
+        {
+          connectionId: request.model.connectionId,
+          modelId: request.model.modelId,
+        },
+      );
+    }
   }
 
   #unsupported(request: RequestContext, capability: Capability): never {

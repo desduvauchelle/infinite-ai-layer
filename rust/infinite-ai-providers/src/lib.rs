@@ -90,47 +90,186 @@ async fn checked(
     Err(error)
 }
 
-fn api_messages(messages: &[Message]) -> Vec<Value> {
-    messages
-        .iter()
-        .map(|message| {
-            let role = match message.role {
-                Role::System => "system",
-                Role::User => "user",
-                Role::Assistant => "assistant",
-                Role::Tool => "tool",
-            };
-            if let Some(ContentPart::ToolResult { result }) = message
-                .content
-                .iter()
-                .find(|part| matches!(part, ContentPart::ToolResult { .. }))
-            {
-                return json!({
-                    "role": "tool",
-                    "content": serde_json::to_string(&result.result).unwrap_or_else(|_| "null".into()),
-                    "tool_call_id": result.call_id,
-                    "tool_name": result.name,
-                });
-            }
-            let tool_calls = message
-                .content
-                .iter()
-                .filter_map(|part| match part {
-                    ContentPart::ToolCall { call } => Some(json!({
-                        "id": call.id,
-                        "type": "function",
-                        "function": { "name": call.name, "arguments": call.arguments.to_string() },
-                    })),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            let mut value = json!({ "role": role, "content": message.text_content() });
-            if !tool_calls.is_empty() {
-                value["tool_calls"] = Value::Array(tool_calls);
-            }
-            value
-        })
+fn base64_encode(input: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    let mut index = 0;
+    while index < input.len() {
+        let b0 = input[index];
+        let b1 = input.get(index + 1).copied().unwrap_or(0);
+        let b2 = input.get(index + 2).copied().unwrap_or(0);
+        out.push(CHARS[(b0 >> 2) as usize] as char);
+        out.push(CHARS[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        if index + 1 < input.len() {
+            out.push(CHARS[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if index + 2 < input.len() {
+            out.push(CHARS[(b2 & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        index += 3;
+    }
+    out
+}
+
+#[derive(Clone, Copy)]
+enum ChatStyle {
+    OpenAi,
+    Ollama,
+}
+
+const EXCLUSIVE_MODEL_CAPABILITIES: [Capability; 7] = [
+    Capability::Embeddings,
+    Capability::Transcription,
+    Capability::SpeechGeneration,
+    Capability::ImageGeneration,
+    Capability::ImageEditing,
+    Capability::VideoGeneration,
+    Capability::VideoEditing,
+];
+
+fn is_embedding_model_id(id: &str) -> bool {
+    let value = id.to_ascii_lowercase();
+    value.contains("embedding") || value.contains("embed-")
+}
+
+fn is_transcription_model_id(id: &str) -> bool {
+    let value = id.to_ascii_lowercase();
+    value.contains("whisper") || value.contains("transcribe") || value.contains("speech-to-text")
+}
+
+fn advertised_openai_model_capabilities(id: &str, connection: &[Capability]) -> Vec<Capability> {
+    let surface = connection.iter().copied().filter(|capability| {
+        !matches!(
+            capability,
+            Capability::ProviderHealth | Capability::ModelListing
+        )
+    });
+    if is_embedding_model_id(id) {
+        return surface
+            .filter(|capability| matches!(capability, Capability::Embeddings))
+            .collect();
+    }
+    if is_transcription_model_id(id) {
+        return surface
+            .filter(|capability| matches!(capability, Capability::Transcription))
+            .collect();
+    }
+    surface
+        .filter(|capability| !EXCLUSIVE_MODEL_CAPABILITIES.contains(capability))
         .collect()
+}
+
+fn dropped_part_error(kind: &str) -> AiError {
+    AiError::new(
+        ErrorCode::UnsupportedCapability,
+        format!("{kind} message parts cannot be sent by this adapter."),
+    )
+}
+
+#[allow(clippy::result_large_err)]
+fn api_messages(messages: &[Message], style: ChatStyle) -> Result<Vec<Value>, AiError> {
+    let mut encoded = Vec::with_capacity(messages.len());
+    for message in messages {
+        let role = match message.role {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::Tool => "tool",
+        };
+        if let Some(ContentPart::ToolResult { result }) = message
+            .content
+            .iter()
+            .find(|part| matches!(part, ContentPart::ToolResult { .. }))
+        {
+            encoded.push(json!({
+                "role": "tool",
+                "content": serde_json::to_string(&result.result).unwrap_or_else(|_| "null".into()),
+                "tool_call_id": result.call_id,
+                "tool_name": result.name,
+            }));
+            continue;
+        }
+        let tool_calls = message
+            .content
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::ToolCall { call } => Some(json!({
+                    "id": call.id,
+                    "type": "function",
+                    "function": { "name": call.name, "arguments": call.arguments.to_string() },
+                })),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut value = json!({ "role": role, "content": message.text_content() });
+        if !tool_calls.is_empty() {
+            value["tool_calls"] = Value::Array(tool_calls);
+        }
+        match style {
+            ChatStyle::OpenAi => {
+                let mut content = Vec::new();
+                let mut has_media = false;
+                for part in &message.content {
+                    match part {
+                        ContentPart::Text { text } => {
+                            content.push(json!({ "type": "text", "text": text }));
+                        }
+                        ContentPart::Image { media } => {
+                            has_media = true;
+                            let url = if let Some(url) =
+                                media.url.as_ref().filter(|value| !value.is_empty())
+                            {
+                                url.clone()
+                            } else if let Some(data) = &media.data {
+                                format!("data:{};base64,{}", media.mime_type, base64_encode(data))
+                            } else {
+                                return Err(AiError::new(
+                                    ErrorCode::InvalidRequest,
+                                    "Image parts require either bytes or a URL.",
+                                ));
+                            };
+                            content
+                                .push(json!({ "type": "image_url", "image_url": { "url": url } }));
+                        }
+                        ContentPart::Audio { .. } => return Err(dropped_part_error("audio")),
+                        ContentPart::File { .. } => return Err(dropped_part_error("file")),
+                        ContentPart::ToolCall { .. } | ContentPart::ToolResult { .. } => {}
+                    }
+                }
+                if has_media {
+                    value["content"] = Value::Array(content);
+                }
+            }
+            ChatStyle::Ollama => {
+                let mut images = Vec::new();
+                for part in &message.content {
+                    match part {
+                        ContentPart::Image { media } => {
+                            let Some(data) = &media.data else {
+                                return Err(AiError::new(
+                                    ErrorCode::InvalidRequest,
+                                    "Ollama image parts require bytes; URL-only image inputs are not sent.",
+                                ));
+                            };
+                            images.push(Value::String(base64_encode(data)));
+                        }
+                        ContentPart::Audio { .. } => return Err(dropped_part_error("audio")),
+                        ContentPart::File { .. } => return Err(dropped_part_error("file")),
+                        _ => {}
+                    }
+                }
+                if !images.is_empty() {
+                    value["images"] = Value::Array(images);
+                }
+            }
+        }
+        encoded.push(value);
+    }
+    Ok(encoded)
 }
 
 fn api_tools(tools: &[ToolDefinition]) -> Vec<Value> {
@@ -143,6 +282,7 @@ fn api_tools(tools: &[ToolDefinition]) -> Vec<Value> {
                     "name": tool.name,
                     "description": tool.description,
                     "parameters": tool.parameters,
+                    "strict": true,
                 }
             })
         })
@@ -163,9 +303,9 @@ fn tool_choice(choice: &ToolChoice) -> Value {
 fn apply_provider_options(
     body: &mut Value,
     options: &HashMap<String, Map<String, Value>>,
-    adapter_id: &str,
+    connection_id: &str,
 ) {
-    let Some(overrides) = options.get(adapter_id) else {
+    let Some(overrides) = options.get(connection_id) else {
         return;
     };
     let Some(target) = body.as_object_mut() else {
@@ -419,7 +559,7 @@ impl ProviderAdapter for OllamaAdapter {
         let request_id = request.resolved_request_id();
         let mut body = json!({
             "model": request.model.model_id,
-            "messages": api_messages(&request.messages),
+            "messages": api_messages(&request.messages, ChatStyle::Ollama)?,
             "stream": false,
         });
         if request.temperature.is_some() || request.max_output_tokens.is_some() {
@@ -431,7 +571,7 @@ impl ProviderAdapter for OllamaAdapter {
         if !request.tools.is_empty() {
             body["tools"] = Value::Array(api_tools(&request.tools));
         }
-        apply_provider_options(&mut body, &request.provider_options, "ollama");
+        apply_provider_options(&mut body, &request.provider_options, &self.connection.id);
         let response = checked(
             self.client
                 .post(self.endpoint("api/chat")?)
@@ -503,7 +643,7 @@ impl ProviderAdapter for OllamaAdapter {
         }
         let mut body = json!({
             "model": model.model_id,
-            "messages": api_messages(&request.messages),
+            "messages": api_messages(&request.messages, ChatStyle::Ollama)?,
             "stream": true,
         });
         if request.temperature.is_some() || request.max_output_tokens.is_some() {
@@ -515,7 +655,7 @@ impl ProviderAdapter for OllamaAdapter {
         if !request.tools.is_empty() {
             body["tools"] = Value::Array(api_tools(&request.tools));
         }
-        apply_provider_options(&mut body, &request.provider_options, "ollama");
+        apply_provider_options(&mut body, &request.provider_options, &self.connection.id);
         let response = checked(
             self.client
                 .post(self.endpoint("api/chat")?)
@@ -608,7 +748,7 @@ impl ProviderAdapter for OllamaAdapter {
         let mut text_request = request.text;
         text_request
             .provider_options
-            .entry("ollama".into())
+            .entry(self.connection.id.clone())
             .or_default()
             .insert("format".into(), schema.clone());
         let result = self.generate_text(text_request).await?;
@@ -843,10 +983,11 @@ impl OpenAiCompatibleAdapter {
         })
     }
 
-    fn chat_body(&self, request: &TextRequest, stream: bool) -> Value {
+    #[allow(clippy::result_large_err)]
+    fn chat_body(&self, request: &TextRequest, stream: bool) -> Result<Value, AiError> {
         let mut body = json!({
             "model": request.model.model_id,
-            "messages": api_messages(&request.messages),
+            "messages": api_messages(&request.messages, ChatStyle::OpenAi)?,
             "stream": stream,
         });
         if stream {
@@ -864,12 +1005,8 @@ impl OpenAiCompatibleAdapter {
         if let Some(choice) = &request.tool_choice {
             body["tool_choice"] = tool_choice(choice);
         }
-        apply_provider_options(
-            &mut body,
-            &request.provider_options,
-            &self.connection.adapter_id,
-        );
-        body
+        apply_provider_options(&mut body, &request.provider_options, &self.connection.id);
+        Ok(body)
     }
 
     fn request(
@@ -978,40 +1115,37 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
             .into_iter()
             .flatten()
             .filter_map(|model| {
-                model["id"].as_str().map(|id| ModelInfo {
-                    id: id.into(),
-                    name: model["name"]
-                        .as_str()
-                        .map(str::to_string)
-                        .or_else(|| Some(id.into())),
-                    capabilities: self
-                        .connection
-                        .capabilities
-                        .iter()
-                        .copied()
-                        .filter(|capability| {
-                            !matches!(
-                                capability,
-                                Capability::ProviderHealth | Capability::ModelListing
-                            )
-                        })
-                        .collect(),
-                    context_window: model["context_length"].as_u64(),
-                    structured_output: Some(
-                        if self
-                            .connection
-                            .capabilities
-                            .contains(&Capability::StructuredOutput)
-                        {
-                            StructuredOutputSupport::NativeSchema
-                        } else {
-                            StructuredOutputSupport::Unsupported
-                        },
-                    ),
-                    metadata: Some(Map::from_iter([(
-                        "capabilitySource".into(),
-                        Value::String("connection-default".into()),
-                    )])),
+                model["id"].as_str().map(|id| {
+                    let capabilities =
+                        advertised_openai_model_capabilities(id, &self.connection.capabilities);
+                    let specialized = is_embedding_model_id(id) || is_transcription_model_id(id);
+                    ModelInfo {
+                        id: id.into(),
+                        name: model["name"]
+                            .as_str()
+                            .map(str::to_string)
+                            .or_else(|| Some(id.into())),
+                        structured_output: Some(
+                            if capabilities.contains(&Capability::StructuredOutput) {
+                                StructuredOutputSupport::NativeSchema
+                            } else {
+                                StructuredOutputSupport::Unsupported
+                            },
+                        ),
+                        capabilities,
+                        context_window: model["context_length"].as_u64(),
+                        metadata: Some(Map::from_iter([(
+                            "capabilitySource".into(),
+                            Value::String(
+                                (if specialized {
+                                    "model-id-heuristic"
+                                } else {
+                                    "adapter-surface"
+                                })
+                                .to_string(),
+                            ),
+                        )])),
+                    }
                 })
             })
             .collect())
@@ -1030,7 +1164,7 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
             ));
         }
         let request_id = request.resolved_request_id();
-        let body = self.chat_body(&request, false);
+        let body = self.chat_body(&request, false)?;
         let response = checked(
             self.request(reqwest::Method::POST, "chat/completions")?
                 .timeout(Duration::from_millis(request.timeout_ms.unwrap_or(120_000)))
@@ -1086,7 +1220,7 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
                 &model,
             ));
         }
-        let body = self.chat_body(&request, true);
+        let body = self.chat_body(&request, true)?;
         let response = checked(
             self.request(reqwest::Method::POST, "chat/completions")?
                 .timeout(Duration::from_millis(request.timeout_ms.unwrap_or(120_000)))
@@ -1103,6 +1237,8 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
             let mut buffer = String::new();
             let mut final_usage = None;
             let mut final_reason = FinishReason::Unknown;
+            let mut provider_id = None;
+            let mut upstream_model = None;
             let mut tool_calls = HashMap::<usize, (String, String, String)>::new();
             loop {
                 let next = if let Some(token) = &cancellation {
@@ -1125,6 +1261,16 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
                     for line in event.lines().filter_map(|line| line.strip_prefix("data: ")) {
                         if line == "[DONE]" { continue; }
                         let value: Value = serde_json::from_str(line).map_err(|_| model_error(ErrorCode::ProviderError, "Provider returned malformed SSE JSON.", &model))?;
+                        if provider_id.is_none()
+                            && let Some(id) = value["id"].as_str()
+                        {
+                            provider_id = Some(id.to_string());
+                        }
+                        if upstream_model.is_none()
+                            && let Some(name) = value["model"].as_str()
+                        {
+                            upstream_model = Some(name.to_string());
+                        }
                         let choice = &value["choices"][0];
                         if let Some(reasoning) = choice["delta"]["reasoning"].as_str().filter(|value| !value.is_empty()) { yield StreamEvent::ReasoningDelta { delta: reasoning.into() }; }
                         if let Some(text) = choice["delta"]["content"].as_str().filter(|value| !value.is_empty()) { yield StreamEvent::TextDelta { delta: text.into() }; }
@@ -1155,7 +1301,14 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
                     arguments: serde_json::from_str(&arguments).unwrap_or_else(|_| json!({ "raw": arguments })),
                 }};
             }
-            yield StreamEvent::Finish { reason: if had_tool_calls { FinishReason::ToolCalls } else if final_reason == FinishReason::Unknown { FinishReason::Stop } else { final_reason }, usage: final_usage, provider_metadata: None };
+            let mut metadata = Map::new();
+            if let Some(id) = provider_id {
+                metadata.insert("requestId".into(), Value::String(id));
+            }
+            if let Some(name) = upstream_model {
+                metadata.insert("upstreamModel".into(), Value::String(name));
+            }
+            yield StreamEvent::Finish { reason: if had_tool_calls { FinishReason::ToolCalls } else if final_reason == FinishReason::Unknown { FinishReason::Stop } else { final_reason }, usage: final_usage, provider_metadata: (!metadata.is_empty()).then_some(metadata) };
         }))
     }
 
@@ -1191,11 +1344,11 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
         })?;
 
         let request_id = request.text.resolved_request_id();
-        let mut body = self.chat_body(&request.text, false);
+        let mut body = self.chat_body(&request.text, false)?;
         body["response_format"] = json!({
             "type": "json_schema",
             "json_schema": {
-                "name": request.schema_name.as_deref().unwrap_or("response"),
+                "name": request.schema_name.as_deref().unwrap_or("result"),
                 "strict": true,
                 "schema": schema,
             }
@@ -1203,7 +1356,7 @@ impl ProviderAdapter for OpenAiCompatibleAdapter {
         apply_provider_options(
             &mut body,
             &request.text.provider_options,
-            &self.connection.adapter_id,
+            &self.connection.id,
         );
         let response = checked(
             self.request(reqwest::Method::POST, "chat/completions")?
@@ -1519,6 +1672,7 @@ mod tests {
         let requests = server.received_requests().await.unwrap();
         let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
         assert_eq!(body["tools"][0]["function"]["name"], "weather");
+        assert_eq!(body["tools"][0]["function"]["strict"], true);
         assert_eq!(body["tool_choice"]["function"]["name"], "weather");
     }
 
@@ -1560,5 +1714,49 @@ mod tests {
         };
         let result = adapter.generate_object(request).await.unwrap();
         assert_eq!(result.value["answer"], 42);
+    }
+
+    #[tokio::test]
+    async fn openai_does_not_advertise_embed_or_transcribe_on_chat_models() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    { "id": "gpt-4o" },
+                    { "id": "text-embedding-3-small" },
+                    { "id": "whisper-1" }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let adapter = OpenAiCompatibleAdapter::new(
+            "cloud",
+            "openai",
+            "OpenAI",
+            &format!("{}/", server.uri()),
+            "test-key",
+        )
+        .unwrap();
+        let models = adapter.list_models().await.unwrap();
+        let chat = models.iter().find(|model| model.id == "gpt-4o").unwrap();
+        assert!(!chat.capabilities.contains(&Capability::Embeddings));
+        assert!(!chat.capabilities.contains(&Capability::Transcription));
+        assert_eq!(
+            models
+                .iter()
+                .find(|model| model.id == "text-embedding-3-small")
+                .unwrap()
+                .capabilities,
+            vec![Capability::Embeddings]
+        );
+        assert_eq!(
+            models
+                .iter()
+                .find(|model| model.id == "whisper-1")
+                .unwrap()
+                .capabilities,
+            vec![Capability::Transcription]
+        );
     }
 }

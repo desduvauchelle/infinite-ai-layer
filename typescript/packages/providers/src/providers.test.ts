@@ -207,7 +207,71 @@ describe("OpenAICompatibleAdapter", () => {
     expect(request.tools).toHaveLength(1);
     expect(request).toMatchObject({
       tool_choice: { type: "function", function: { name: "weather" } },
+      tools: [{ function: { strict: true } }],
     });
+  });
+
+  it("does not copy embed or transcribe onto chat model ids", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              { id: "gpt-4o" },
+              { id: "text-embedding-3-small" },
+              { id: "whisper-1" },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = new OpenAICompatibleAdapter({
+      id: "cloud",
+      apiKey: "test-key",
+    });
+    const models = await adapter.listModels();
+    const chat = models.find((model) => model.id === "gpt-4o");
+    expect(chat?.capabilities).not.toContain("embeddings");
+    expect(chat?.capabilities).not.toContain("transcription");
+    expect(
+      models.find((model) => model.id === "text-embedding-3-small")
+        ?.capabilities,
+    ).toEqual(["embeddings"]);
+    expect(
+      models.find((model) => model.id === "whisper-1")?.capabilities,
+    ).toEqual(["transcription"]);
+  });
+
+  it("keys providerOptions by connection id", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Hi" }, finish_reason: "stop" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new OpenAICompatibleAdapter({
+      id: "personal-openai",
+      apiKey: "test-key",
+    });
+    await adapter.generateText!({
+      model: { connectionId: "personal-openai", modelId: "gpt-4o" },
+      messages: [textMessage("user", "Hi")],
+      providerOptions: {
+        openai: { temperature: 0 },
+        "personal-openai": { user: "denis" },
+      },
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      user?: string;
+      temperature?: number;
+    };
+    expect(body.user).toBe("denis");
+    expect(body.temperature).toBeUndefined();
   });
 
   it("redacts authentication failures", async () => {

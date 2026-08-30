@@ -9,6 +9,7 @@ import {
   Menu,
   MessageSquarePlus,
   Network,
+  Pencil,
   Plus,
   Radio,
   Send,
@@ -762,11 +763,12 @@ interface ConnectionsPageProps {
   onConnectionsChange: (connections: ConnectionSummary[]) => void;
 }
 
-function ConnectionsPage({
+export function ConnectionsPage({
   connections,
   onConnectionsChange,
 }: ConnectionsPageProps) {
   const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string>();
   const [kind, setKind] = useState<ConnectionInput["kind"]>("ollama");
   const [label, setLabel] = useState("My Ollama");
   const [id, setId] = useState("local-ollama");
@@ -784,12 +786,54 @@ function ConnectionsPage({
       { state: "checking" | "available" | "failed"; message: string }
     >
   >({});
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const labelInputRef = useRef<HTMLInputElement | null>(null);
 
   const configured = useMemo(
     () => connections.filter((connection) => connection.kind !== "mock"),
     [connections],
   );
   const isCli = kind === "codex-cli" || kind === "claude-cli";
+  const editingConnection = connections.find(
+    (connection) => connection.id === editingId,
+  );
+
+  useEffect(() => {
+    if (!formOpen) return;
+    formRef.current?.scrollIntoView?.({ block: "start" });
+    labelInputRef.current?.focus();
+  }, [editingId, formOpen]);
+
+  function closeForm(): void {
+    setFormOpen(false);
+    setEditingId(undefined);
+    setFormError(undefined);
+    setApiKey("");
+  }
+
+  function startAdd(): void {
+    setEditingId(undefined);
+    setFormError(undefined);
+    setWorkspace("");
+    changeKind("ollama");
+    setFormOpen(true);
+  }
+
+  function startEdit(connection: ConnectionSummary): void {
+    if (connection.kind === "mock") return;
+    setEditingId(connection.id);
+    setKind(connection.kind);
+    setLabel(connection.label);
+    setId(connection.id);
+    setBaseUrl(connection.baseUrl ?? "");
+    setApiKey("");
+    setExecutable(connection.executable ?? "");
+    setWorkspace(connection.workspace ?? "");
+    setCliModelId(connection.modelId ?? "");
+    setBoundary(connection.boundary);
+    setFormError(undefined);
+    setFormOpen(true);
+  }
 
   function changeKind(next: ConnectionInput["kind"]): void {
     setKind(next);
@@ -799,7 +843,7 @@ function ConnectionsPage({
       setExecutable(next === "codex-cli" ? "codex" : "claude");
       setBaseUrl("");
       setApiKey("");
-      setCliModelId("");
+      setCliModelId(next === "codex-cli" ? "gpt-5.6-sol" : "sonnet");
       setBoundary("public-cloud");
     } else if (
       next === "ollama" ||
@@ -850,12 +894,19 @@ function ConnectionsPage({
         ...(workspace.trim() === "" ? {} : { workspace: workspace.trim() }),
         ...(cliModelId.trim() === "" ? {} : { modelId: cliModelId.trim() }),
       });
-      onConnectionsChange([
-        ...connections.filter((connection) => connection.id !== saved.id),
-        saved,
-      ]);
-      setFormOpen(false);
-      setApiKey("");
+      onConnectionsChange(
+        connections.some((connection) => connection.id === saved.id)
+          ? connections.map((connection) =>
+              connection.id === saved.id ? saved : connection,
+            )
+          : [...connections, saved],
+      );
+      setHealth((current) => {
+        const next = { ...current };
+        delete next[saved.id];
+        return next;
+      });
+      closeForm();
     } catch (error) {
       setFormError(
         error instanceof Error
@@ -927,7 +978,7 @@ function ConnectionsPage({
         <button
           className="primary-button"
           type="button"
-          onClick={() => setFormOpen((current) => !current)}
+          onClick={formOpen ? closeForm : startAdd}
         >
           {formOpen ? <X aria-hidden="true" /> : <Plus aria-hidden="true" />}
           {formOpen ? "Close form" : "Add connection"}
@@ -936,6 +987,7 @@ function ConnectionsPage({
 
       {formOpen && (
         <form
+          ref={formRef}
           className="connection-form"
           onSubmit={(event) => void submit(event)}
         >
@@ -945,8 +997,16 @@ function ConnectionsPage({
             <span />
           </div>
           <div className="form-heading">
-            <span className="eyebrow">New interchange</span>
-            <h2>Register a provider</h2>
+            <span className="eyebrow">
+              {editingConnection === undefined
+                ? "New interchange"
+                : "Line maintenance"}
+            </span>
+            <h2>
+              {editingConnection === undefined
+                ? "Register a provider"
+                : `Edit ${editingConnection.label}`}
+            </h2>
             <p>
               Credentials stay in this local server process and are never
               returned to the browser.
@@ -957,6 +1017,7 @@ function ConnectionsPage({
               <span>Provider</span>
               <select
                 value={kind}
+                disabled={editingConnection !== undefined}
                 onChange={(event) =>
                   changeKind(event.target.value as ConnectionInput["kind"])
                 }
@@ -975,6 +1036,7 @@ function ConnectionsPage({
             <label>
               <span>Display name</span>
               <input
+                ref={labelInputRef}
                 value={label}
                 required
                 onChange={(event) => setLabel(event.target.value)}
@@ -984,6 +1046,7 @@ function ConnectionsPage({
               <span>Connection ID</span>
               <input
                 value={id}
+                disabled={editingConnection !== undefined}
                 required
                 pattern="[A-Za-z0-9][A-Za-z0-9-_]{1,39}"
                 onChange={(event) => setId(event.target.value)}
@@ -1014,9 +1077,16 @@ function ConnectionsPage({
                   <input
                     type="password"
                     value={apiKey}
-                    required
+                    required={
+                      editingConnection === undefined ||
+                      !editingConnection.hasCredential
+                    }
                     autoComplete="off"
-                    placeholder="Stored in memory only"
+                    placeholder={
+                      editingConnection?.hasCredential === true
+                        ? "Leave blank to keep the stored key"
+                        : "Stored in memory only"
+                    }
                     onChange={(event) => setApiKey(event.target.value)}
                   />
                 </label>
@@ -1049,15 +1119,19 @@ function ConnectionsPage({
                   </small>
                 </label>
                 <label>
-                  <span>Model ID (optional)</span>
+                  <span>Model ID</span>
                   <input
                     value={cliModelId}
+                    required
                     autoComplete="off"
-                    placeholder="Use the CLI configured default"
+                    placeholder={
+                      kind === "codex-cli" ? "gpt-5.6-sol" : "sonnet"
+                    }
                     onChange={(event) => setCliModelId(event.target.value)}
                   />
                   <small>
-                    Expose this model for selection before dispatch.
+                    Selected explicitly before each dispatch; never inherited
+                    invisibly.
                   </small>
                 </label>
               </>
@@ -1086,7 +1160,7 @@ function ConnectionsPage({
             <button
               type="button"
               className="secondary-button"
-              onClick={() => setFormOpen(false)}
+              onClick={closeForm}
             >
               Cancel
             </button>
@@ -1096,7 +1170,13 @@ function ConnectionsPage({
               ) : (
                 <Plus aria-hidden="true" />
               )}
-              {saving ? "Registering…" : "Register connection"}
+              {saving
+                ? editingConnection === undefined
+                  ? "Registering…"
+                  : "Saving…"
+                : editingConnection === undefined
+                  ? "Register connection"
+                  : "Save changes"}
             </button>
           </div>
         </form>
@@ -1165,14 +1245,24 @@ function ConnectionsPage({
                   Test line
                 </button>
                 {connection.kind !== "mock" && (
-                  <button
-                    className="icon-button danger"
-                    type="button"
-                    aria-label={`Remove ${connection.label}`}
-                    onClick={() => void remove(connection)}
-                  >
-                    <Trash2 aria-hidden="true" />
-                  </button>
+                  <>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => startEdit(connection)}
+                    >
+                      <Pencil aria-hidden="true" />
+                      Edit line
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      type="button"
+                      aria-label={`Remove ${connection.label}`}
+                      onClick={() => void remove(connection)}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </button>
+                  </>
                 )}
               </div>
             </article>

@@ -137,10 +137,13 @@ function configFrom(value: unknown): ConnectionConfig {
     typeof input.baseUrl === "string" && input.baseUrl.trim() !== ""
       ? input.baseUrl.trim()
       : undefined;
-  const apiKey =
+  const submittedApiKey =
     typeof input.apiKey === "string" && input.apiKey.trim() !== ""
       ? input.apiKey.trim()
       : undefined;
+  const existing = configs.get(id);
+  const apiKey =
+    submittedApiKey ?? (existing?.kind === kind ? existing.apiKey : undefined);
   const executable =
     typeof input.executable === "string" && input.executable.trim() !== ""
       ? input.executable.trim()
@@ -164,6 +167,11 @@ function configFrom(value: unknown): ConnectionConfig {
     throw new AiError(
       "invalid-request",
       "An API key is required for this provider.",
+    );
+  if ((kind === "codex-cli" || kind === "claude-cli") && modelId === undefined)
+    throw new AiError(
+      "invalid-request",
+      "Terminal CLI connections require an explicit model ID.",
     );
   return {
     id,
@@ -366,7 +374,7 @@ async function handle(
           ? {}
           : {
               providerOptions: {
-                [configs.get(connectionId)!.kind]: {
+                [connectionId]: {
                   workspace: configs.get(connectionId)!.workspace!,
                 },
               },

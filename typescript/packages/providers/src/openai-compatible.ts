@@ -121,6 +121,65 @@ function defaultCapabilities(kind: OpenAICompatibleKind): Capability[] {
     : [...common, "reasoning-events", "transcription"];
 }
 
+const EXCLUSIVE_MODEL_CAPABILITIES: Capability[] = [
+  "embeddings",
+  "transcription",
+  "speech-generation",
+  "image-generation",
+  "image-editing",
+  "video-generation",
+  "video-editing",
+];
+
+function bytesToBase64(data: Uint8Array): string {
+  let binary = "";
+  for (const byte of data) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function openaiImagePart(media: {
+  mimeType: string;
+  data?: Uint8Array;
+  url?: string;
+}): Record<string, unknown> {
+  if (media.url !== undefined && media.url.trim() !== "") {
+    return { type: "image_url", image_url: { url: media.url } };
+  }
+  if (media.data !== undefined) {
+    return {
+      type: "image_url",
+      image_url: {
+        url: `data:${media.mimeType};base64,${bytesToBase64(media.data)}`,
+      },
+    };
+  }
+  throw new AiError(
+    "invalid-request",
+    "Image parts require either bytes or a URL.",
+  );
+}
+
+function apiContent(message: Message): unknown {
+  const mediaParts = message.content.filter(
+    (part) =>
+      part.type === "image" || part.type === "audio" || part.type === "file",
+  );
+  if (mediaParts.length === 0) return messageText(message);
+  const content: Array<Record<string, unknown>> = [];
+  for (const part of message.content) {
+    if (part.type === "text") content.push({ type: "text", text: part.text });
+    else if (part.type === "image") content.push(openaiImagePart(part.media));
+    else if (part.type === "tool-call" || part.type === "tool-result") continue;
+    else {
+      throw new AiError(
+        "unsupported-capability",
+        `${part.type} message parts cannot be sent by this adapter.`,
+      );
+    }
+  }
+  return content;
+}
+
 function apiMessages(messages: Message[]): Array<Record<string, unknown>> {
   return messages.map((message): Record<string, unknown> => {
     const toolResult = message.content.find(
@@ -147,10 +206,41 @@ function apiMessages(messages: Message[]): Array<Record<string, unknown>> {
       }));
     return {
       role: message.role,
-      content: messageText(message),
+      content: apiContent(message),
       ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }),
     };
   });
+}
+
+function isEmbeddingModelId(id: string): boolean {
+  const value = id.toLowerCase();
+  return value.includes("embedding") || value.includes("embed-");
+}
+
+function isTranscriptionModelId(id: string): boolean {
+  const value = id.toLowerCase();
+  return (
+    value.includes("whisper") ||
+    value.includes("transcribe") ||
+    value.includes("speech-to-text")
+  );
+}
+
+export function advertisedOpenAiModelCapabilities(
+  id: string,
+  connectionCapabilities: Capability[],
+): Capability[] {
+  const surface = connectionCapabilities.filter(
+    (capability) =>
+      capability !== "provider-health" && capability !== "model-listing",
+  );
+  if (isEmbeddingModelId(id))
+    return surface.filter((capability) => capability === "embeddings");
+  if (isTranscriptionModelId(id))
+    return surface.filter((capability) => capability === "transcription");
+  return surface.filter(
+    (capability) => !EXCLUSIVE_MODEL_CAPABILITIES.includes(capability),
+  );
 }
 
 function normalizedUsage(value?: ChatUsage): Usage | undefined {
@@ -279,24 +369,28 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     };
     return (data.data ?? []).flatMap((model) => {
       if (model.id === undefined) return [];
+      const capabilities = advertisedOpenAiModelCapabilities(
+        model.id,
+        this.connection.capabilities,
+      );
+      const specialized =
+        isEmbeddingModelId(model.id) || isTranscriptionModelId(model.id);
       return [
         {
           id: model.id,
           name: model.name ?? model.id,
-          capabilities: this.connection.capabilities.filter(
-            (capability) =>
-              capability !== "provider-health" &&
-              capability !== "model-listing",
-          ),
-          structuredOutput: this.connection.capabilities.includes(
-            "structured-output",
-          )
+          capabilities,
+          structuredOutput: capabilities.includes("structured-output")
             ? ("native-schema" as const)
             : ("unsupported" as const),
           ...(model.context_length === undefined
             ? {}
             : { contextWindow: model.context_length }),
-          metadata: { capabilitySource: "connection-default" },
+          metadata: {
+            capabilitySource: specialized
+              ? "model-id-heuristic"
+              : "adapter-surface",
+          },
         },
       ];
     });
@@ -466,8 +560,8 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     }
     const providerOptions = {
       ...(request.providerOptions ?? {}),
-      [this.#kind]: {
-        ...(request.providerOptions?.[this.#kind] ?? {}),
+      [this.connection.id]: {
+        ...(request.providerOptions?.[this.connection.id] ?? {}),
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -626,7 +720,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   #body(request: TextRequest, stream: boolean): JsonObject {
-    const ownOptions = request.providerOptions?.[this.#kind] ?? {};
+    const ownOptions = request.providerOptions?.[this.connection.id] ?? {};
     return {
       model: request.model.modelId,
       messages: apiMessages(request.messages) as never,

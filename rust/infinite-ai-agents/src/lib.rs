@@ -235,11 +235,19 @@ impl AgentAdapter for CodexCliAdapter {
         let stderr = child.stderr.take().ok_or_else(|| {
             AiError::new(ErrorCode::ProviderError, "Codex stderr was unavailable.")
         })?;
+        let stderr_task = tokio::spawn(async move {
+            let mut error_text = String::new();
+            BufReader::new(stderr)
+                .read_to_string(&mut error_text)
+                .await
+                .map(|_| error_text)
+        });
         let model = request.agent.clone();
         let workspace = request.workspace.clone();
         let stream = try_stream! {
             yield AgentEvent::Start { request_id, agent: model, workspace };
             let mut lines = BufReader::new(stdout).lines();
+            let mut provider_failure = None;
             loop {
                 let selected = tokio::select! {
                     _ = cancellation.cancelled() => None,
@@ -262,23 +270,24 @@ impl AgentAdapter for CodexCliAdapter {
                 let value: Value = serde_json::from_str(&line).map_err(|error| {
                     AiError::new(ErrorCode::ProviderError, format!("Invalid Codex JSONL event: {error}"))
                 })?;
+                provider_failure = codex_failure(&value).or(provider_failure);
                 for event in map_codex_event(&value) {
                     yield event;
                 }
             }
             if let Some(task) = &timeout_task { task.abort(); }
             let status = child.wait().await.map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?;
+            let error_text = stderr_task
+                .await
+                .map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?
+                .map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?;
             if status.success() {
                 yield AgentEvent::Finish { reason: FinishReason::Stop, usage: None };
             } else {
-                let mut error_text = String::new();
-                BufReader::new(stderr)
-                    .read_to_string(&mut error_text)
-                    .await
-                    .map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?;
+                let fallback = summarize_stderr(&error_text, "Codex CLI exited unsuccessfully.");
                 Err(AiError::new(
                     ErrorCode::ProviderError,
-                    if error_text.trim().is_empty() { "Codex CLI exited unsuccessfully." } else { error_text.trim() },
+                    provider_failure.as_deref().unwrap_or(&fallback),
                 ))?;
             }
         };
@@ -297,6 +306,10 @@ impl ProviderAdapter for CodexCliAdapter {
 
     async fn health(&self) -> Result<HealthResult, AiError> {
         <Self as AgentAdapter>::health(self).await
+    }
+
+    async fn run_agent(&self, request: AgentRequest) -> Result<AgentEventStream, AiError> {
+        <Self as AgentAdapter>::run_agent(self, request).await
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, AiError> {
@@ -357,7 +370,7 @@ impl ProviderAdapter for CodexCliAdapter {
         let request_id = request.resolved_request_id();
         let workspace = request
             .provider_options
-            .get("codex-cli")
+            .get(&self.connection.id)
             .and_then(|options| options.get("workspace"))
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -634,11 +647,19 @@ impl AgentAdapter for ClaudeCliAdapter {
                 "Claude Code stderr was unavailable.",
             )
         })?;
+        let stderr_task = tokio::spawn(async move {
+            let mut error_text = String::new();
+            BufReader::new(stderr)
+                .read_to_string(&mut error_text)
+                .await
+                .map(|_| error_text)
+        });
         let model = request.agent.clone();
         let workspace = request.workspace.clone();
         let stream = try_stream! {
             yield AgentEvent::Start { request_id, agent: model, workspace };
             let mut lines = BufReader::new(stdout).lines();
+            let mut provider_failure = None;
             loop {
                 let selected = tokio::select! {
                     _ = cancellation.cancelled() => None,
@@ -659,23 +680,24 @@ impl AgentAdapter for ClaudeCliAdapter {
                 let value: Value = serde_json::from_str(&line).map_err(|error| {
                     AiError::new(ErrorCode::ProviderError, format!("Invalid Claude Code JSONL event: {error}"))
                 })?;
+                provider_failure = claude_failure(&value).or(provider_failure);
                 for event in map_claude_event(&value) {
                     yield event;
                 }
             }
             if let Some(task) = &timeout_task { task.abort(); }
             let status = child.wait().await.map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?;
+            let error_text = stderr_task
+                .await
+                .map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?
+                .map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?;
             if status.success() {
                 yield AgentEvent::Finish { reason: FinishReason::Stop, usage: None };
             } else {
-                let mut error_text = String::new();
-                BufReader::new(stderr)
-                    .read_to_string(&mut error_text)
-                    .await
-                    .map_err(|error| AiError::new(ErrorCode::ProviderError, error.to_string()))?;
+                let fallback = summarize_stderr(&error_text, "Claude Code CLI exited unsuccessfully.");
                 Err(AiError::new(
                     ErrorCode::ProviderError,
-                    if error_text.trim().is_empty() { "Claude Code CLI exited unsuccessfully." } else { error_text.trim() },
+                    provider_failure.as_deref().unwrap_or(&fallback),
                 ))?;
             }
         };
@@ -692,6 +714,10 @@ impl ProviderAdapter for ClaudeCliAdapter {
 
     async fn health(&self) -> Result<HealthResult, AiError> {
         <Self as AgentAdapter>::health(self).await
+    }
+
+    async fn run_agent(&self, request: AgentRequest) -> Result<AgentEventStream, AiError> {
+        <Self as AgentAdapter>::run_agent(self, request).await
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, AiError> {
@@ -752,7 +778,7 @@ impl ProviderAdapter for ClaudeCliAdapter {
         let request_id = request.resolved_request_id();
         let workspace = request
             .provider_options
-            .get("claude-cli")
+            .get(&self.connection.id)
             .and_then(|options| options.get("workspace"))
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -872,7 +898,9 @@ fn map_codex_event(value: &Value) -> Vec<AgentEvent> {
             .collect(),
         "error" => vec![AgentEvent::Warning {
             code: "codex-error".into(),
-            message: string_at(value, &["message"])
+            message: value
+                .get("message")
+                .and_then(provider_message)
                 .unwrap_or_else(|| "Codex reported an error.".into()),
         }],
         _ => Vec::new(),
@@ -951,6 +979,56 @@ fn map_claude_event(value: &Value) -> Vec<AgentEvent> {
         }
     }
     events
+}
+
+fn codex_failure(value: &Value) -> Option<String> {
+    match value.get("type").and_then(Value::as_str) {
+        Some("error") => value.get("message").and_then(provider_message),
+        Some("turn.failed") => value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(provider_message),
+        _ => None,
+    }
+}
+
+fn claude_failure(value: &Value) -> Option<String> {
+    (value.get("type").and_then(Value::as_str) == Some("result")
+        && value.get("is_error").and_then(Value::as_bool) == Some(true))
+    .then(|| value.get("result").and_then(provider_message))
+    .flatten()
+}
+
+fn provider_message(value: &Value) -> Option<String> {
+    match value {
+        Value::String(message) => serde_json::from_str::<Value>(message)
+            .ok()
+            .as_ref()
+            .and_then(provider_message)
+            .or_else(|| Some(message.clone())),
+        Value::Object(object) => object
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| object.get("error").and_then(provider_message)),
+        _ => None,
+    }
+}
+
+fn summarize_stderr(stderr: &str, fallback: &str) -> String {
+    stderr
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| {
+            let value = line.trim();
+            if value.chars().count() <= 1_000 {
+                value.to_string()
+            } else {
+                format!("{}…", value.chars().take(1_000).collect::<String>())
+            }
+        })
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn map_item(value: &Value) -> Vec<AgentEvent> {
@@ -1280,6 +1358,45 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":2,"output_tokens
         assert!(events.iter().any(
             |event| matches!(event, AgentEvent::Usage { usage } if usage.total_tokens == Some(3))
         ));
+        std::fs::remove_dir_all(executable.parent().unwrap()).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn codex_surfaces_structured_failure_instead_of_noisy_stderr() {
+        let _guard = FAKE_CLI_TEST_LOCK.lock().await;
+        let executable = fake_cli(
+            r#"printf '%s\n' '{"type":"error","message":"{\"type\":\"error\",\"error\":{\"message\":\"The selected model requires a newer Codex CLI.\"}}"}'
+printf '%s\n' '2026-01-01 WARN unrelated plugin warning with a local path' >&2
+exit 1"#,
+        );
+        let workspace = executable.parent().unwrap().to_string_lossy().into_owned();
+        let adapter = CodexCliAdapter::new("codex")
+            .with_executable(executable.to_string_lossy().into_owned());
+        let mut request = AgentRequest::new(
+            infinite_ai_core::ModelRef {
+                connection_id: "codex".into(),
+                model_id: "default".into(),
+            },
+            "Inspect",
+            workspace,
+        );
+        request.maximum_boundary = Some(DataBoundary::PublicCloud);
+        let mut stream = AgentAdapter::run_agent(&adapter, request).await.unwrap();
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap(),
+            AgentEvent::Start { .. }
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap(),
+            AgentEvent::Warning { .. }
+        ));
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert_eq!(error.code, ErrorCode::ProviderError);
+        assert_eq!(
+            error.message,
+            "The selected model requires a newer Codex CLI."
+        );
         std::fs::remove_dir_all(executable.parent().unwrap()).unwrap();
     }
 

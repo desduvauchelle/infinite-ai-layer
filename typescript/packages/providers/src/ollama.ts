@@ -43,6 +43,12 @@ interface OllamaChunk {
   eval_count?: number;
 }
 
+function bytesToBase64(data: Uint8Array): string {
+  let binary = "";
+  for (const byte of data) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
 function ollamaMessages(messages: Message[]): Array<Record<string, unknown>> {
   return messages.map((message) => {
     const toolResult = message.content.find(
@@ -63,10 +69,28 @@ function ollamaMessages(messages: Message[]): Array<Record<string, unknown>> {
           arguments: part.type === "tool-call" ? part.call.arguments : {},
         },
       }));
+    const images: string[] = [];
+    for (const part of message.content) {
+      if (part.type === "audio" || part.type === "file") {
+        throw new AiError(
+          "unsupported-capability",
+          `${part.type} message parts cannot be sent by this adapter.`,
+        );
+      }
+      if (part.type !== "image") continue;
+      if (part.media.data === undefined) {
+        throw new AiError(
+          "invalid-request",
+          "Ollama image parts require bytes; URL-only image inputs are not sent.",
+        );
+      }
+      images.push(bytesToBase64(part.media.data));
+    }
     return {
       role: message.role,
       content: messageText(message),
       ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }),
+      ...(images.length === 0 ? {} : { images }),
     };
   });
 }
@@ -235,7 +259,7 @@ export class OllamaAdapter implements ProviderAdapter {
                   function: tool,
                 })),
               }),
-          ...(request.providerOptions?.ollama ?? {}),
+          ...(request.providerOptions?.[this.connection.id] ?? {}),
         }),
       },
       this.connection.id,
@@ -307,8 +331,8 @@ export class OllamaAdapter implements ProviderAdapter {
       ...request,
       providerOptions: {
         ...(request.providerOptions ?? {}),
-        ollama: {
-          ...(request.providerOptions?.ollama ?? {}),
+        [this.connection.id]: {
+          ...(request.providerOptions?.[this.connection.id] ?? {}),
           format: request.schema,
         },
       },
@@ -381,7 +405,7 @@ export class OllamaAdapter implements ProviderAdapter {
                   function: tool,
                 })),
               }),
-          ...(request.providerOptions?.ollama ?? {}),
+          ...(request.providerOptions?.[this.connection.id] ?? {}),
         }),
       },
       this.connection.id,

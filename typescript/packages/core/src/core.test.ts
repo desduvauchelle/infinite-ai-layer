@@ -5,6 +5,8 @@ import {
   MockAdapter,
   redactSecrets,
   textMessage,
+  type AgentEvent,
+  type AgentRequest,
 } from "./index.js";
 
 describe("AiClient", () => {
@@ -79,6 +81,75 @@ describe("AiClient", () => {
         tools: [{ name: "known", parameters: { type: "object" } }],
         toolChoice: { name: "missing" },
       }),
+    ).rejects.toMatchObject({ code: "invalid-request" });
+  });
+
+  it("rejects embeddings on a listed chat model even when the connection advertises them", async () => {
+    const adapter = new MockAdapter();
+    adapter.connection.capabilities.push("embeddings");
+    const client = new AiClient({ adapters: [adapter] });
+    await client.listModels("mock");
+    await expect(
+      client.embed({
+        model: { connectionId: "mock", modelId: "fixture-chat" },
+        input: ["hello"],
+      }),
+    ).rejects.toMatchObject({ code: "unsupported-capability" });
+  });
+
+  it("runs agents through AiClient with boundary preflight", async () => {
+    class AgentMock extends MockAdapter {
+      constructor() {
+        super({ id: "agent" });
+        this.connection.capabilities.push("agent-execution");
+      }
+
+      async *runAgent(request: AgentRequest): AsyncIterable<AgentEvent> {
+        yield {
+          type: "start",
+          requestId: "req",
+          agent: request.agent,
+          workspace: request.workspace,
+        };
+        yield { type: "finish", reason: "stop" };
+      }
+    }
+    const adapter = new AgentMock();
+    const client = new AiClient({ adapters: [adapter] });
+    const events = [];
+    for await (const event of client.runAgent({
+      agent: { connectionId: "agent", modelId: "fixture-chat" },
+      prompt: "Inspect",
+      workspace: "/tmp",
+      permissions: {
+        read: true,
+        edit: false,
+        shell: false,
+        network: false,
+        outsideWorkspace: false,
+      },
+    })) {
+      events.push(event);
+    }
+    expect(events[0]?.type).toBe("start");
+    expect(events.at(-1)?.type).toBe("finish");
+    await expect(
+      (async () => {
+        for await (const _event of client.runAgent({
+          agent: { connectionId: "agent", modelId: "fixture-chat" },
+          prompt: "Inspect",
+          workspace: "relative",
+          permissions: {
+            read: true,
+            edit: false,
+            shell: false,
+            network: false,
+            outsideWorkspace: false,
+          },
+        })) {
+          /* drain */
+        }
+      })(),
     ).rejects.toMatchObject({ code: "invalid-request" });
   });
 });

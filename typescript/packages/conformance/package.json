@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@infinite-ai/core": "workspace:*",
+    "@infinite-ai/providers": "workspace:*",
     "ajv": "^8.17.1"
   },
   "devDependencies": {

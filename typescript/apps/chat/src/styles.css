@@ -729,6 +729,7 @@ code,
 }
 .connection-form {
   position: relative;
+  scroll-margin-top: 20px;
   display: grid;
   grid-template-columns: 90px minmax(220px, 0.7fr) minmax(340px, 1.3fr);
   gap: 26px;
@@ -791,7 +792,8 @@ code,
   padding: 10px 12px;
   color: #ffd3d3;
   background: #2b1b24;
-  box-shadow: inset 3px 0 var(--scarlet);
+  border: 1px solid var(--scarlet);
+  border-radius: 8px;
 }
 .form-actions {
   grid-column: 3;
@@ -888,7 +890,12 @@ code,
 }
 .connection-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+.connection-actions .secondary-button svg {
+  width: 16px;
+  height: 16px;
 }
 .icon-button {
   display: grid;

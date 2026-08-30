@@ -134,6 +134,26 @@ printf '%s\\n' '{"type":"result","subtype":"success","session_id":"claude-sessio
     });
   });
 
+  it("surfaces the structured Codex failure instead of noisy stderr", async () => {
+    const { executable, workspace } = await fixture(`
+printf '%s\\n' '{"type":"error","message":"{\\"type\\":\\"error\\",\\"error\\":{\\"message\\":\\"The selected model requires a newer Codex CLI.\\"}}"}'
+printf '%s\\n' '2026-01-01 WARN unrelated plugin warning with a local path' >&2
+exit 1
+`);
+    const adapter = new CodexCliAdapter({ id: "codex", executable });
+    const consume = async (): Promise<void> => {
+      for await (const _event of adapter.runAgent(
+        request("codex", workspace),
+      )) {
+        // Consume the full process stream so its terminal error is observed.
+      }
+    };
+    await expect(consume()).rejects.toMatchObject({
+      code: "provider-error",
+      message: "The selected model requires a newer Codex CLI.",
+    });
+  });
+
   it("rejects a relative workspace before spawning", async () => {
     const adapter = new CodexCliAdapter({ id: "codex" });
     const iterator = adapter

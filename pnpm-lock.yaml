@@ -96,6 +96,9 @@ importers:
       "@infinite-ai/core":
         specifier: workspace:*
         version: link:../core
+      "@infinite-ai/providers":
+        specifier: workspace:*
+        version: link:../providers
       ajv:
         specifier: ^8.17.1
         version: 8.20.0

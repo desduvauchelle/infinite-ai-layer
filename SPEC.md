@@ -95,22 +95,16 @@ Working layout; names may change before publication.
 │   └── capability-registry.md
 ├── rust/
 │   ├── infinite-ai-core/        # Types, traits, streams, errors, policies
-│   ├── infinite-ai-http/        # Shared HTTP transport helpers
 │   ├── infinite-ai-providers/   # Official Rust adapters
 │   ├── infinite-ai-agents/      # Terminal agent adapters
 │   └── infinite-ai-conformance/ # Adapter test kit
 ├── typescript/
 │   ├── packages/core/           # Web-standard contracts and utilities
-│   ├── packages/server/         # Server facade and registration
-│   ├── packages/client/         # Browser-safe application client
 │   ├── packages/providers/      # Official HTTP adapters
-│   ├── packages/node/           # Node-only integrations
-│   └── packages/conformance/    # Adapter test kit
-└── examples/
-    ├── rust-cli/
-    ├── tauri-desktop/
-    ├── node-server/
-    └── next-web/
+│   ├── packages/agents/         # Terminal agent adapters
+│   ├── packages/conformance/    # Adapter test kit
+│   └── apps/chat/               # Local configuration and chat acceptance app
+└── docs/
 ```
 
 Provider packages may be split further when independent releases become useful. The core packages must not depend on official provider packages.
@@ -490,16 +484,16 @@ The core project guarantees only officially maintained adapters. Community adapt
 
 `Required` means part of the 0.1 release gate. `Planned` means represented in the capability design but not required for 0.1.
 
-| Adapter                 |                 Rust 0.1 | TypeScript 0.1 | Runtime         | Initial capabilities                                                                         |
-| ----------------------- | -----------------------: | -------------: | --------------- | -------------------------------------------------------------------------------------------- |
-| Ollama                  |                 Required |       Required | Local HTTP      | Health, models, text, streaming, embeddings where model supports them                        |
-| OpenAI API              |                 Required |       Required | Cloud HTTP      | Models where available, text, streaming, structured output, tools, embeddings, transcription |
-| Codex CLI               |                 Required |       Required | Native terminal | Read-only text mode plus explicit agent execution                                            |
-| Claude Code CLI         |                 Required |       Required | Native terminal | Read-only text mode plus explicit agent execution                                            |
-| OpenRouter              | Planned after core proof |       Required | Cloud HTTP      | Capability-dependent gateway access                                                          |
-| Vercel AI Gateway       | Planned after core proof |       Required | Cloud HTTP      | Capability-dependent gateway access                                                          |
-| Apple Foundation Models |                  Planned | Not applicable | Apple native    | Text, streaming, structured output, tools, supported multimodal input                        |
-| Apple Speech            |                  Planned | Not applicable | Apple native    | Live and prerecorded transcription                                                           |
+| Adapter                 | Rust 0.1 | TypeScript 0.1 | Runtime         | Initial capabilities                                                                         |
+| ----------------------- | -------: | -------------: | --------------- | -------------------------------------------------------------------------------------------- |
+| Ollama                  | Required |       Required | Local HTTP      | Health, models, text, streaming, embeddings where model supports them                        |
+| OpenAI API              | Required |       Required | Cloud HTTP      | Models where available, text, streaming, structured output, tools, embeddings, transcription |
+| Codex CLI               | Required |       Required | Native terminal | Read-only text mode plus explicit agent execution                                            |
+| Claude Code CLI         | Required |       Required | Native terminal | Read-only text mode plus explicit agent execution                                            |
+| OpenRouter              | Required |       Required | Cloud HTTP      | Capability-dependent gateway access                                                          |
+| Vercel AI Gateway       | Required |       Required | Cloud HTTP      | Capability-dependent gateway access                                                          |
+| Apple Foundation Models |  Planned | Not applicable | Apple native    | Text, streaming, structured output, tools, supported multimodal input                        |
+| Apple Speech            |  Planned | Not applicable | Apple native    | Live and prerecorded transcription                                                           |
 
 Provider documentation and live capability responses remain authoritative. The matrix is verified and versioned rather than assumed permanent.
 

@@ -9,3 +9,9 @@ publish = false
 infinite-ai-core = { path = "../infinite-ai-core", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+infinite-ai-providers = { path = "../infinite-ai-providers", version = "0.1.0" }
+futures-util.workspace = true
+tokio.workspace = true
+wiremock.workspace = true

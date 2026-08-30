@@ -30,4 +30,5 @@ export interface ProviderAdapter {
   generateObject?(request: ObjectRequest): Promise<ObjectResult>;
   embed?(request: EmbeddingRequest): Promise<EmbeddingResult>;
   transcribe?(request: TranscriptionRequest): Promise<TranscriptionResult>;
+  runAgent?(request: AgentRequest): AsyncIterable<AgentEvent>;
 }

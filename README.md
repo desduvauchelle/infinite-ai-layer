@@ -212,6 +212,8 @@ pnpm dev
 
 Open `http://127.0.0.1:5173`. Use **Connections** to register an already-running local provider, cloud provider, Codex CLI, or Claude Code CLI; optionally choose an absolute workspace for a CLI; test it; choose its model; and return to the chat. CLI chat calls are read-only. Connection credentials live only in the local Node demo process and are never returned to browser code. Restarting the demo server clears registered connections. Chat history is demo-only browser state, not SDK state.
 
+The demo requires an explicit terminal model ID instead of silently inheriting a CLI default. It starts Codex connections with the currently tested `gpt-5.6-sol` value and Claude Code connections with the documented `sonnet` alias; both remain editable before registration.
+
 The demo starts two local processes:
 
 - The Vite interface at `http://127.0.0.1:5173`.

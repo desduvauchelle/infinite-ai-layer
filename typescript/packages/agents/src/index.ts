@@ -1,8 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { createInterface } from "node:readline";
 import { constants } from "node:fs";
+import type { Readable } from "node:stream";
 
 import {
   AiError,
@@ -26,6 +27,7 @@ import {
 } from "@infinite-ai/core";
 
 type CliKind = "codex-cli" | "claude-cli";
+type CliChild = ChildProcessByStdio<null, Readable, Readable>;
 
 export interface CliAgentOptions {
   id: string;
@@ -38,7 +40,7 @@ export interface CliAgentOptions {
 
 interface ParsedEvent {
   events: AgentEvent[];
-  usage?: Usage;
+  fatalError?: string;
 }
 
 abstract class CliAgentAdapter implements AgentAdapter, ProviderAdapter {
@@ -146,7 +148,7 @@ abstract class CliAgentAdapter implements AgentAdapter, ProviderAdapter {
 
   async *streamText(request: TextRequest): AsyncIterable<StreamEvent> {
     const workspace =
-      workspaceOption(request.providerOptions, this.kind) ??
+      workspaceOption(request.providerOptions, this.connection.id) ??
       this.defaultWorkspace ??
       process.cwd();
     const prompt = request.messages
@@ -227,6 +229,7 @@ abstract class CliAgentAdapter implements AgentAdapter, ProviderAdapter {
     child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
     let settled = false;
     let timedOut = false;
+    let providerFailure: string | undefined;
     const stop = (): void => terminate(child);
     const abort = (): void => stop();
     request.signal?.addEventListener("abort", abort, { once: true });
@@ -264,7 +267,9 @@ abstract class CliAgentAdapter implements AgentAdapter, ProviderAdapter {
             },
           );
         }
-        for (const event of this.parse(value).events) yield event;
+        const parsed = this.parse(value);
+        providerFailure = parsed.fatalError ?? providerFailure;
+        for (const event of parsed.events) yield event;
       }
       const code = await completion;
       settled = true;
@@ -278,7 +283,8 @@ abstract class CliAgentAdapter implements AgentAdapter, ProviderAdapter {
         return;
       }
       if (code !== 0) {
-        const message = Buffer.concat(stderr).toString("utf8").trim();
+        const message =
+          providerFailure ?? summarizeStderr(Buffer.concat(stderr), code);
         throw new AiError(
           "provider-error",
           message || `${this.connection.label} exited with status ${code}.`,
@@ -296,17 +302,13 @@ abstract class CliAgentAdapter implements AgentAdapter, ProviderAdapter {
   protected abstract parse(value: JsonObject): ParsedEvent;
   protected abstract versionCompatible(version: string): boolean;
 
-  private spawn(request: AgentRequest): ChildProcessWithoutNullStreams {
+  private spawn(request: AgentRequest): CliChild {
     try {
-      const child = spawn(this.executable, this.args(request), {
+      return spawn(this.executable, this.args(request), {
         cwd: request.workspace,
         detached: process.platform !== "win32",
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
       });
-      // Codex treats a piped stdin as additional prompt input and waits for EOF.
-      // Close it immediately because this adapter passes the complete prompt as an argument.
-      child.stdin.end();
-      return child;
     } catch (error) {
       throw asAiError(error, "provider-unavailable");
     }
@@ -389,7 +391,11 @@ export class CodexCliAdapter extends CliAgentAdapter {
   }
 
   protected parse(value: JsonObject): ParsedEvent {
-    return { events: parseCodex(value) };
+    const fatalError = codexFailure(value);
+    return {
+      events: parseCodex(value),
+      ...(fatalError === undefined ? {} : { fatalError }),
+    };
   }
 
   protected versionCompatible(version: string): boolean {
@@ -434,7 +440,11 @@ export class ClaudeCliAdapter extends CliAgentAdapter {
   }
 
   protected parse(value: JsonObject): ParsedEvent {
-    return { events: parseClaude(value) };
+    const fatalError = claudeFailure(value);
+    return {
+      events: parseClaude(value),
+      ...(fatalError === undefined ? {} : { fatalError }),
+    };
   }
 
   protected versionCompatible(version: string): boolean {
@@ -610,9 +620,9 @@ function readOnlyPermissions(): AgentPermissions {
 
 function workspaceOption(
   options: Record<string, JsonObject> | undefined,
-  kind: CliKind,
+  connectionId: string,
 ): string | undefined {
-  const value = options?.[kind]?.workspace;
+  const value = options?.[connectionId]?.workspace;
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
@@ -622,7 +632,7 @@ function boundaryRank(boundary: DataBoundary): number {
   );
 }
 
-function terminate(child: ChildProcessWithoutNullStreams): void {
+function terminate(child: CliChild): void {
   if (child.exitCode !== null) return;
   if (process.platform !== "win32" && child.pid !== undefined) {
     try {
@@ -633,14 +643,51 @@ function terminate(child: ChildProcessWithoutNullStreams): void {
   } else child.kill("SIGKILL");
 }
 
-function exitCode(
-  child: ChildProcessWithoutNullStreams,
-): Promise<number | null> {
+function exitCode(child: CliChild): Promise<number | null> {
   if (child.exitCode !== null) return Promise.resolve(child.exitCode);
   return new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("close", resolve);
   });
+}
+
+function codexFailure(value: JsonObject): string | undefined {
+  if (value.type === "error") return providerMessage(value.message);
+  if (value.type === "turn.failed" && isObject(value.error))
+    return providerMessage(value.error.message);
+  return undefined;
+}
+
+function claudeFailure(value: JsonObject): string | undefined {
+  return value.type === "result" && value.is_error === true
+    ? providerMessage(value.result)
+    : undefined;
+}
+
+function providerMessage(value: JsonValue | undefined): string | undefined {
+  if (isObject(value)) {
+    if (typeof value.message === "string") return value.message;
+    if (isObject(value.error) && typeof value.error.message === "string")
+      return value.error.message;
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  try {
+    return providerMessage(JSON.parse(value) as JsonValue) ?? value;
+  } catch {
+    return value;
+  }
+}
+
+function summarizeStderr(stderr: Buffer, code: number | null): string {
+  const lastLine = stderr
+    .toString("utf8")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .at(-1);
+  if (lastLine === undefined) return `CLI exited with status ${code}.`;
+  return lastLine.length <= 1_000 ? lastLine : `${lastLine.slice(0, 1_000)}…`;
 }
 
 function runVersion(

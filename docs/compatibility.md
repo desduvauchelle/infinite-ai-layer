@@ -23,7 +23,7 @@ The portable Rust core and HTTP adapters are intended for macOS and Linux. The T
 | LM Studio                 | Yes        | Yes  | OpenAI-compatible local server                                                                | Configuration path implemented; live pending |
 | llama.cpp server          | Yes        | Yes  | OpenAI-compatible local server                                                                | Configuration path implemented; live pending |
 | Custom OpenAI-compatible  | Yes        | Yes  | Configured base URL and common compatible operations                                          | Mocked compatibility tests                   |
-| Codex CLI                 | Yes        | Yes  | Health/version, read-only text, streaming, permissioned agent execution                       | Fake-process tests; live CLI 0.139 smoke     |
+| Codex CLI                 | Yes        | Yes  | Health/version, read-only text, streaming, permissioned agent execution                       | Fake-process tests; live CLI 0.151 smoke     |
 | Claude Code CLI           | Yes        | Yes  | Health/version, read-only text, streaming, permissioned agent execution                       | Fake-process tests; live install pending     |
 | Apple Intelligence        | No         | No   | Planned native adapter                                                                        | Deferred                                     |
 | Gemini terminal CLI       | No         | No   | Planned terminal adapter                                                                      | Deferred                                     |
@@ -33,6 +33,6 @@ The portable Rust core and HTTP adapters are intended for macOS and Linux. The T
 
 ## Terminal CLIs
 
-The Rust and TypeScript adapters accept Codex CLI `0.100.0` and later in the current `0.x` line. They were version-probed against `codex-cli 0.139.0`. Claude Code accepts a semantic version reported by its CLI. Both are classified as `public-cloud`, require an absolute workspace for native agent execution, default to read-only, reject outside-workspace and explicit network permission, and terminate the process group on timeout or cancellation. The host may explicitly grant edit and shell permissions for native `runAgent`; regular text/chat calls remain read-only.
+The Rust and TypeScript adapters accept Codex CLI `0.100.0` and later in the current `0.x` line. They were live-tested against `codex-cli 0.151.0`; `gpt-5.6-sol` was rejected by `0.139.0` and accepted after that upgrade. Claude Code accepts a semantic version reported by its CLI. Both are classified as `public-cloud`, require an absolute workspace for native agent execution, default to read-only, reject outside-workspace and explicit network permission, and terminate the process group on timeout or cancellation. The host may explicitly grant edit and shell permissions for native `runAgent`; regular text/chat calls remain read-only.
 
 Live provider smoke tests are intentionally opt-in and are not part of the credential-free default check.
