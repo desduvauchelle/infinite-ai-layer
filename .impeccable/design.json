@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-29T00:00:00.000Z",
+  "title": "Design System: Infinite AI Layer",
+  "extensions": {
+    "colorMeta": {
+      "midnight-enamel": {
+        "role": "neutral",
+        "displayName": "Midnight Enamel",
+        "canonical": "#07162d"
+      },
+      "porcelain": {
+        "role": "neutral",
+        "displayName": "Porcelain",
+        "canonical": "#f6f3ea"
+      },
+      "scarlet": {
+        "role": "primary",
+        "displayName": "Scarlet Route",
+        "canonical": "#f04444"
+      },
+      "cobalt": {
+        "role": "secondary",
+        "displayName": "Cobalt Route",
+        "canonical": "#4778ff"
+      },
+      "amber": {
+        "role": "tertiary",
+        "displayName": "Amber Route",
+        "canonical": "#ffbd38"
+      },
+      "route-green": {
+        "role": "tertiary",
+        "displayName": "Green Route",
+        "canonical": "#46b86d"
+      }
+    },
+    "shadows": [
+      {
+        "name": "drawer",
+        "value": "12px 0 32px rgba(0, 6, 18, 0.38)",
+        "purpose": "Mobile navigation drawer only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "route-arrival",
+        "value": "420ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "One streaming arrival pulse along the active route."
+      }
+    ],
+    "breakpoints": [{ "name": "rail-collapse", "value": "780px" }]
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "Model Transit Control",
+    "overview": "Provider connections are routes, models are stops, and the active chat is the journey in motion.",
+    "keyCharacteristics": [
+      "Midnight enamel",
+      "Porcelain seams",
+      "Route-colored state",
+      "Stable conversation platform"
+    ],
+    "rules": [
+      {
+        "name": "The Route Ink Rule",
+        "body": "Route colors identify connections and state; they never decorate prose.",
+        "section": "colors"
+      }
+    ],
+    "dos": ["Use route color for provider provenance."],
+    "donts": ["Do not wrap every element in a floating card."]
+  }
+}

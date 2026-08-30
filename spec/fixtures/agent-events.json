@@ -1,0 +1,31 @@
+{
+  "contractVersion": "0.1",
+  "kind": "agent-events",
+  "value": [
+    {
+      "type": "start",
+      "requestId": "agent_fixture_1",
+      "agent": { "connectionId": "codex", "modelId": "default" },
+      "workspace": "/tmp/infinite-ai-fixture"
+    },
+    { "type": "session", "sessionId": "session_fixture_1" },
+    { "type": "reasoning-delta", "delta": "Inspecting the requested context." },
+    {
+      "type": "command",
+      "command": "rg --files",
+      "status": "completed",
+      "output": "README.md"
+    },
+    { "type": "text-delta", "delta": "The workspace contains a README." },
+    {
+      "type": "usage",
+      "usage": {
+        "inputTokens": 12,
+        "outputTokens": 8,
+        "totalTokens": 20,
+        "cost": { "source": "unavailable" }
+      }
+    },
+    { "type": "finish", "reason": "stop" }
+  ]
+}

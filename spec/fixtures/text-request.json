@@ -1,0 +1,30 @@
+{
+  "contractVersion": "0.1",
+  "kind": "text-request",
+  "value": {
+    "requestId": "req_fixture_1",
+    "model": { "connectionId": "home-ollama", "modelId": "llama3.2" },
+    "messages": [
+      {
+        "role": "system",
+        "content": [{ "type": "text", "text": "Be concise." }]
+      },
+      { "role": "user", "content": [{ "type": "text", "text": "Hello" }] }
+    ],
+    "tools": [
+      {
+        "name": "lookup_note",
+        "description": "Read a note by identifier.",
+        "parameters": {
+          "type": "object",
+          "properties": { "id": { "type": "string" } },
+          "required": ["id"],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "toolChoice": { "name": "lookup_note" },
+    "maximumBoundary": "device",
+    "timeoutMs": 30000
+  }
+}

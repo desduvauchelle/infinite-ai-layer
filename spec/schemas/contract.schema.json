@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infinite-ai.dev/spec/0.1/contract.schema.json",
+  "title": "Infinite AI Layer portable contract",
+  "type": "object",
+  "required": ["contractVersion", "kind", "value"],
+  "properties": {
+    "contractVersion": { "const": "0.1" },
+    "kind": {
+      "enum": [
+        "text-request",
+        "stream-events",
+        "object-result",
+        "error",
+        "embedding-result",
+        "transcription-result",
+        "agent-request",
+        "agent-events"
+      ]
+    },
+    "value": {}
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "text-request" } } },
+      "then": { "properties": { "value": { "$ref": "#/$defs/textRequest" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "stream-events" } } },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/streamEvent" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "object-result" } } },
+      "then": { "properties": { "value": { "$ref": "#/$defs/objectResult" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "error" } } },
+      "then": { "properties": { "value": { "$ref": "#/$defs/error" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "embedding-result" } } },
+      "then": {
+        "properties": { "value": { "$ref": "#/$defs/embeddingResult" } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "transcription-result" } } },
+      "then": {
+        "properties": { "value": { "$ref": "#/$defs/transcriptionResult" } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "agent-request" } } },
+      "then": { "properties": { "value": { "$ref": "#/$defs/agentRequest" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "agent-events" } } },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/agentEvent" }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "modelRef": {
+      "type": "object",
+      "required": ["connectionId", "modelId"],
+      "properties": {
+        "connectionId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "dataBoundary": {
+      "enum": ["device", "local-network", "private-remote", "public-cloud"]
+    },
+    "media": {
+      "type": "object",
+      "required": ["mimeType"],
+      "properties": {
+        "mimeType": { "type": "string", "minLength": 1 },
+        "data": {},
+        "url": { "type": "string" }
+      },
+      "anyOf": [
+        { "required": ["data"], "properties": { "data": {} } },
+        { "required": ["url"], "properties": { "url": { "type": "string" } } }
+      ]
+    },
+    "toolCall": {
+      "type": "object",
+      "required": ["id", "name", "arguments"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "minLength": 1 },
+        "arguments": {}
+      }
+    },
+    "toolResult": {
+      "type": "object",
+      "required": ["callId", "name", "result"],
+      "properties": {
+        "callId": { "type": "string" },
+        "name": { "type": "string" },
+        "result": {},
+        "isError": { "type": "boolean" }
+      }
+    },
+    "contentPart": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "media"],
+          "properties": {
+            "type": { "enum": ["image", "audio", "file"] },
+            "media": { "$ref": "#/$defs/media" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "call"],
+          "properties": {
+            "type": { "const": "tool-call" },
+            "call": { "$ref": "#/$defs/toolCall" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "result"],
+          "properties": {
+            "type": { "const": "tool-result" },
+            "result": { "$ref": "#/$defs/toolResult" }
+          }
+        }
+      ]
+    },
+    "message": {
+      "type": "object",
+      "required": ["role", "content"],
+      "properties": {
+        "role": { "enum": ["system", "user", "assistant", "tool"] },
+        "content": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/contentPart" }
+        }
+      }
+    },
+    "toolDefinition": {
+      "type": "object",
+      "required": ["name", "parameters"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "parameters": { "type": "object" }
+      }
+    },
+    "toolChoice": {
+      "oneOf": [
+        { "enum": ["auto", "none", "required"] },
+        {
+          "type": "object",
+          "required": ["name"],
+          "properties": { "name": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "textRequest": {
+      "type": "object",
+      "required": ["model", "messages"],
+      "properties": {
+        "requestId": { "type": "string" },
+        "model": { "$ref": "#/$defs/modelRef" },
+        "messages": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/message" }
+        },
+        "maxOutputTokens": { "type": "integer", "minimum": 1 },
+        "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "maximumBoundary": { "$ref": "#/$defs/dataBoundary" },
+        "metadata": { "type": "object" },
+        "providerOptions": { "type": "object" },
+        "tools": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/toolDefinition" }
+        },
+        "toolChoice": { "$ref": "#/$defs/toolChoice" }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "amount": { "type": "string" },
+        "currency": { "type": "string" },
+        "source": {
+          "enum": [
+            "provider-reported",
+            "sdk-estimated",
+            "host-supplied",
+            "unavailable"
+          ]
+        },
+        "pricingVersion": { "type": "string" },
+        "calculatedAt": { "type": "string" }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "totalTokens": { "type": "integer", "minimum": 0 },
+        "cachedInputTokens": { "type": "integer", "minimum": 0 },
+        "reasoningTokens": { "type": "integer", "minimum": 0 },
+        "requests": { "type": "integer", "minimum": 0 },
+        "cost": { "$ref": "#/$defs/cost" }
+      }
+    },
+    "finishReason": {
+      "enum": [
+        "stop",
+        "length",
+        "tool-calls",
+        "content-filter",
+        "cancelled",
+        "error",
+        "unknown"
+      ]
+    },
+    "streamEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "requestId", "model"],
+          "properties": {
+            "type": { "const": "start" },
+            "requestId": { "type": "string" },
+            "model": { "$ref": "#/$defs/modelRef" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "delta"],
+          "properties": {
+            "type": { "enum": ["text-delta", "reasoning-delta"] },
+            "delta": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "callId", "name"],
+          "properties": {
+            "type": { "const": "tool-call-start" },
+            "callId": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "callId", "argumentsDelta"],
+          "properties": {
+            "type": { "const": "tool-call-delta" },
+            "callId": { "type": "string" },
+            "argumentsDelta": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "call"],
+          "properties": {
+            "type": { "const": "tool-call" },
+            "call": { "$ref": "#/$defs/toolCall" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "citation"],
+          "properties": {
+            "type": { "const": "citation" },
+            "citation": { "type": "object" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "usage"],
+          "properties": {
+            "type": { "const": "usage" },
+            "usage": { "$ref": "#/$defs/usage" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "code", "message"],
+          "properties": {
+            "type": { "const": "warning" },
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": { "const": "finish" },
+            "reason": { "$ref": "#/$defs/finishReason" },
+            "usage": { "$ref": "#/$defs/usage" },
+            "providerMetadata": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "objectResult": {
+      "type": "object",
+      "required": [
+        "requestId",
+        "model",
+        "value",
+        "rawText",
+        "toolCalls",
+        "finishReason"
+      ],
+      "properties": {
+        "requestId": { "type": "string" },
+        "model": { "$ref": "#/$defs/modelRef" },
+        "value": {},
+        "rawText": { "type": "string" },
+        "toolCalls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/toolCall" }
+        },
+        "finishReason": { "$ref": "#/$defs/finishReason" },
+        "usage": { "$ref": "#/$defs/usage" }
+      }
+    },
+    "embeddingResult": {
+      "type": "object",
+      "required": ["vectors", "model", "dimensions"],
+      "properties": {
+        "vectors": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "number" } }
+        },
+        "model": { "$ref": "#/$defs/modelRef" },
+        "dimensions": { "type": "integer", "minimum": 0 },
+        "normalized": { "type": "boolean" },
+        "inputMode": { "enum": ["query", "document", "unspecified"] },
+        "usage": { "$ref": "#/$defs/usage" }
+      }
+    },
+    "transcriptionResult": {
+      "type": "object",
+      "required": ["text", "model"],
+      "properties": {
+        "text": { "type": "string" },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string" },
+              "startMs": { "type": "integer", "minimum": 0 },
+              "endMs": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "model": { "$ref": "#/$defs/modelRef" },
+        "usage": { "$ref": "#/$defs/usage" },
+        "providerMetadata": { "type": "object" }
+      }
+    },
+    "agentPermissions": {
+      "type": "object",
+      "required": ["read", "edit", "shell", "network", "outsideWorkspace"],
+      "properties": {
+        "read": { "type": "boolean" },
+        "edit": { "type": "boolean" },
+        "shell": { "type": "boolean" },
+        "network": { "type": "boolean" },
+        "outsideWorkspace": { "type": "boolean" }
+      }
+    },
+    "agentRequest": {
+      "type": "object",
+      "required": ["agent", "prompt", "workspace", "permissions"],
+      "properties": {
+        "requestId": { "type": "string" },
+        "agent": { "$ref": "#/$defs/modelRef" },
+        "prompt": { "type": "string", "minLength": 1 },
+        "workspace": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string" },
+        "permissions": { "$ref": "#/$defs/agentPermissions" },
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "maximumBoundary": { "$ref": "#/$defs/dataBoundary" },
+        "providerOptions": { "type": "object" }
+      }
+    },
+    "agentEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "requestId", "agent", "workspace"],
+          "properties": {
+            "type": { "const": "start" },
+            "requestId": { "type": "string" },
+            "agent": { "$ref": "#/$defs/modelRef" },
+            "workspace": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "sessionId"],
+          "properties": {
+            "type": { "const": "session" },
+            "sessionId": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "delta"],
+          "properties": {
+            "type": { "enum": ["text-delta", "reasoning-delta"] },
+            "delta": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "command", "status"],
+          "properties": {
+            "type": { "const": "command" },
+            "command": { "type": "string" },
+            "status": { "type": "string" },
+            "output": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "path", "kind"],
+          "properties": {
+            "type": { "const": "file-change" },
+            "path": { "type": "string" },
+            "kind": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "code", "message"],
+          "properties": {
+            "type": { "const": "warning" },
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "usage"],
+          "properties": {
+            "type": { "const": "usage" },
+            "usage": { "$ref": "#/$defs/usage" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": { "const": "finish" },
+            "reason": { "$ref": "#/$defs/finishReason" },
+            "usage": { "$ref": "#/$defs/usage" }
+          }
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "enum": [
+            "invalid-request",
+            "unsupported-capability",
+            "provider-unavailable",
+            "authentication-failed",
+            "permission-denied",
+            "rate-limited",
+            "quota-exceeded",
+            "content-blocked",
+            "context-overflow",
+            "timeout",
+            "cancelled",
+            "executable-not-found",
+            "incompatible-version",
+            "schema-validation-failed",
+            "data-boundary-violation",
+            "provider-error"
+          ]
+        },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "connectionId": { "type": "string" },
+        "modelId": { "type": "string" },
+        "retryAfterMs": { "type": "integer", "minimum": 0 },
+        "providerCode": { "type": "string" },
+        "details": { "type": "object" }
+      }
+    }
+  }
+}

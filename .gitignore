@@ -1,0 +1,14 @@
+node_modules/
+target/
+dist/
+coverage/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+.turbo/
+.vite/
+.idea/
+.vscode/
+.impeccable/references/

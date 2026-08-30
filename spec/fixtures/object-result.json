@@ -1,0 +1,18 @@
+{
+  "contractVersion": "0.1",
+  "kind": "object-result",
+  "value": {
+    "requestId": "object_fixture_1",
+    "model": { "connectionId": "cloud", "modelId": "demo" },
+    "value": { "answer": 42 },
+    "rawText": "{\"answer\":42}",
+    "toolCalls": [],
+    "finishReason": "stop",
+    "usage": {
+      "inputTokens": 9,
+      "outputTokens": 5,
+      "totalTokens": 14,
+      "cost": { "source": "unavailable" }
+    }
+  }
+}

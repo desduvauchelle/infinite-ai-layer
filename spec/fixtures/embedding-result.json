@@ -1,0 +1,16 @@
+{
+  "contractVersion": "0.1",
+  "kind": "embedding-result",
+  "value": {
+    "vectors": [[0.1, 0.2, 0.3]],
+    "model": { "connectionId": "local", "modelId": "embed-demo" },
+    "dimensions": 3,
+    "normalized": true,
+    "inputMode": "document",
+    "usage": {
+      "inputTokens": 4,
+      "totalTokens": 4,
+      "cost": { "source": "unavailable" }
+    }
+  }
+}

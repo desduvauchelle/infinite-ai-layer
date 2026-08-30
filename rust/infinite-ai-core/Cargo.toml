@@ -1,0 +1,19 @@
+[package]
+name = "infinite-ai-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Provider-neutral AI contracts and routing for Rust"
+documentation = "https://docs.rs/infinite-ai-core"
+
+[dependencies]
+async-stream.workspace = true
+async-trait.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true

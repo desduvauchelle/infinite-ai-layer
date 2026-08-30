@@ -1,0 +1,59 @@
+{
+  "contractVersion": "0.1",
+  "kind": "stream-events",
+  "value": [
+    {
+      "type": "start",
+      "requestId": "req_fixture_1",
+      "model": { "connectionId": "mock", "modelId": "fixture" }
+    },
+    { "type": "reasoning-delta", "delta": "Checking the route." },
+    { "type": "text-delta", "delta": "Hello" },
+    { "type": "text-delta", "delta": " from the fixture." },
+    {
+      "type": "tool-call-start",
+      "callId": "call_fixture_1",
+      "name": "lookup_note"
+    },
+    {
+      "type": "tool-call-delta",
+      "callId": "call_fixture_1",
+      "argumentsDelta": "{\"id\":\"note-1\"}"
+    },
+    {
+      "type": "tool-call",
+      "call": {
+        "id": "call_fixture_1",
+        "name": "lookup_note",
+        "arguments": { "id": "note-1" }
+      }
+    },
+    {
+      "type": "usage",
+      "usage": {
+        "inputTokens": 5,
+        "outputTokens": 6,
+        "totalTokens": 11,
+        "cost": {
+          "amount": "0.00012",
+          "currency": "USD",
+          "source": "provider-reported"
+        }
+      }
+    },
+    {
+      "type": "finish",
+      "reason": "tool-calls",
+      "usage": {
+        "inputTokens": 5,
+        "outputTokens": 6,
+        "totalTokens": 11,
+        "cost": {
+          "amount": "0.00012",
+          "currency": "USD",
+          "source": "provider-reported"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "contractVersion": "0.1",
+  "kind": "error",
+  "value": {
+    "code": "provider-unavailable",
+    "message": "The configured provider is not reachable.",
+    "retryable": true,
+    "connectionId": "home-ollama",
+    "modelId": "llama3.2"
+  }
+}

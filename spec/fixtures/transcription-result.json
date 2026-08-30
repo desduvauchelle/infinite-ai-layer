@@ -1,0 +1,12 @@
+{
+  "contractVersion": "0.1",
+  "kind": "transcription-result",
+  "value": {
+    "text": "Hello from the fixture.",
+    "segments": [
+      { "text": "Hello from the fixture.", "startMs": 0, "endMs": 1250 }
+    ],
+    "model": { "connectionId": "cloud", "modelId": "transcribe-demo" },
+    "providerMetadata": { "language": "en" }
+  }
+}

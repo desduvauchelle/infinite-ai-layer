@@ -1,0 +1,19 @@
+{
+  "contractVersion": "0.1",
+  "kind": "agent-request",
+  "value": {
+    "requestId": "agent_fixture_1",
+    "agent": { "connectionId": "codex", "modelId": "default" },
+    "prompt": "Inspect this workspace without changing files.",
+    "workspace": "/tmp/infinite-ai-fixture",
+    "permissions": {
+      "read": true,
+      "edit": false,
+      "shell": false,
+      "network": false,
+      "outsideWorkspace": false
+    },
+    "maximumBoundary": "public-cloud",
+    "timeoutMs": 30000
+  }
+}
