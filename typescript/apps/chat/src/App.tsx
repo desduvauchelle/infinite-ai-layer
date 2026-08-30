@@ -13,6 +13,7 @@ import {
   Radio,
   Send,
   Settings,
+  TerminalSquare,
   Trash2,
   X,
 } from "lucide-react";
@@ -107,6 +108,7 @@ function routeColor(kind?: ConnectionKind): string {
   if (kind === "openrouter") return "var(--amber)";
   if (kind === "vercel-ai-gateway" || kind === "custom")
     return "var(--scarlet)";
+  if (kind === "codex-cli" || kind === "claude-cli") return "var(--amber)";
   return "var(--porcelain)";
 }
 
@@ -128,10 +130,14 @@ function providerLabel(kind: ConnectionKind): string {
   if (kind === "lm-studio") return "LM Studio";
   if (kind === "llama-cpp") return "llama.cpp";
   if (kind === "custom") return "Custom compatible";
+  if (kind === "codex-cli") return "Codex CLI";
+  if (kind === "claude-cli") return "Claude Code CLI";
   return "Deterministic mock";
 }
 
 function connectionIcon(kind: ConnectionKind) {
+  if (kind === "codex-cli" || kind === "claude-cli")
+    return <TerminalSquare aria-hidden="true" />;
   if (
     kind === "ollama" ||
     kind === "lm-studio" ||
@@ -643,7 +649,10 @@ export function App() {
                         {message.role === "assistant"
                           ? message.connectionId === "demo"
                             ? "Route guide"
-                            : (activeConnection?.label ?? "Assistant")
+                            : (connections.find(
+                                (connection) =>
+                                  connection.id === message.connectionId,
+                              )?.label ?? "Assistant")
                           : "You"}
                       </strong>
                       {message.modelId !== undefined && (
@@ -763,6 +772,9 @@ function ConnectionsPage({
   const [id, setId] = useState("local-ollama");
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434");
   const [apiKey, setApiKey] = useState("");
+  const [executable, setExecutable] = useState("");
+  const [workspace, setWorkspace] = useState("");
+  const [cliModelId, setCliModelId] = useState("");
   const [boundary, setBoundary] = useState<DataBoundary>("device");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string>();
@@ -777,10 +789,23 @@ function ConnectionsPage({
     () => connections.filter((connection) => connection.kind !== "mock"),
     [connections],
   );
+  const isCli = kind === "codex-cli" || kind === "claude-cli";
 
   function changeKind(next: ConnectionInput["kind"]): void {
     setKind(next);
-    if (next === "ollama" || next === "lm-studio" || next === "llama-cpp") {
+    if (next === "codex-cli" || next === "claude-cli") {
+      setLabel(next === "codex-cli" ? "My Codex CLI" : "My Claude Code");
+      setId(next === "codex-cli" ? "codex-cli" : "claude-cli");
+      setExecutable(next === "codex-cli" ? "codex" : "claude");
+      setBaseUrl("");
+      setApiKey("");
+      setCliModelId("");
+      setBoundary("public-cloud");
+    } else if (
+      next === "ollama" ||
+      next === "lm-studio" ||
+      next === "llama-cpp"
+    ) {
       setLabel(
         next === "ollama"
           ? "My Ollama"
@@ -797,11 +822,15 @@ function ConnectionsPage({
             : "http://127.0.0.1:8080/v1",
       );
       setBoundary("device");
+      setExecutable("");
+      setCliModelId("");
     } else {
       setLabel(providerLabel(next));
       setId(next.replace("-ai-gateway", "-gateway"));
       setBaseUrl("");
       setBoundary("public-cloud");
+      setExecutable("");
+      setCliModelId("");
     }
   }
 
@@ -817,6 +846,9 @@ function ConnectionsPage({
         boundary,
         ...(baseUrl.trim() === "" ? {} : { baseUrl: baseUrl.trim() }),
         ...(apiKey.trim() === "" ? {} : { apiKey: apiKey.trim() }),
+        ...(executable.trim() === "" ? {} : { executable: executable.trim() }),
+        ...(workspace.trim() === "" ? {} : { workspace: workspace.trim() }),
+        ...(cliModelId.trim() === "" ? {} : { modelId: cliModelId.trim() }),
       });
       onConnectionsChange([
         ...connections.filter((connection) => connection.id !== saved.id),
@@ -932,6 +964,8 @@ function ConnectionsPage({
                 <option value="ollama">Ollama</option>
                 <option value="lm-studio">LM Studio</option>
                 <option value="llama-cpp">llama.cpp server</option>
+                <option value="codex-cli">Codex CLI</option>
+                <option value="claude-cli">Claude Code CLI</option>
                 <option value="openai">OpenAI</option>
                 <option value="openrouter">OpenRouter</option>
                 <option value="vercel-ai-gateway">Vercel AI Gateway</option>
@@ -956,22 +990,25 @@ function ConnectionsPage({
               />
               <small>Stable reference used by application code.</small>
             </label>
-            <label>
-              <span>Base URL {kind === "ollama" ? "" : "(optional)"}</span>
-              <input
-                type="url"
-                value={baseUrl}
-                placeholder={
-                  kind === "custom"
-                    ? "https://provider.example/v1"
-                    : "Use provider default"
-                }
-                onChange={(event) => setBaseUrl(event.target.value)}
-              />
-            </label>
+            {!isCli && (
+              <label>
+                <span>Base URL {kind === "ollama" ? "" : "(optional)"}</span>
+                <input
+                  type="url"
+                  value={baseUrl}
+                  placeholder={
+                    kind === "custom"
+                      ? "https://provider.example/v1"
+                      : "Use provider default"
+                  }
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                />
+              </label>
+            )}
             {kind !== "ollama" &&
               kind !== "lm-studio" &&
-              kind !== "llama-cpp" && (
+              kind !== "llama-cpp" &&
+              !isCli && (
                 <label>
                   <span>API key</span>
                   <input
@@ -984,6 +1021,47 @@ function ConnectionsPage({
                   />
                 </label>
               )}
+            {isCli && (
+              <>
+                <label>
+                  <span>Executable</span>
+                  <input
+                    value={executable}
+                    required
+                    autoComplete="off"
+                    placeholder={kind === "codex-cli" ? "codex" : "claude"}
+                    onChange={(event) => setExecutable(event.target.value)}
+                  />
+                  <small>
+                    Command name on PATH or an absolute executable path.
+                  </small>
+                </label>
+                <label>
+                  <span>Workspace folder (optional)</span>
+                  <input
+                    value={workspace}
+                    autoComplete="off"
+                    placeholder="Defaults to the server working directory"
+                    onChange={(event) => setWorkspace(event.target.value)}
+                  />
+                  <small>
+                    Must be an existing absolute folder when provided.
+                  </small>
+                </label>
+                <label>
+                  <span>Model ID (optional)</span>
+                  <input
+                    value={cliModelId}
+                    autoComplete="off"
+                    placeholder="Use the CLI configured default"
+                    onChange={(event) => setCliModelId(event.target.value)}
+                  />
+                  <small>
+                    Expose this model for selection before dispatch.
+                  </small>
+                </label>
+              </>
+            )}
             <label>
               <span>Declared data boundary</span>
               <select
@@ -1058,6 +1136,12 @@ function ConnectionsPage({
                 </p>
                 {connection.baseUrl !== undefined && (
                   <small>{connection.baseUrl}</small>
+                )}
+                {connection.workspace !== undefined && (
+                  <small>Workspace: {connection.workspace}</small>
+                )}
+                {connection.modelId !== undefined && (
+                  <small>Model: {connection.modelId}</small>
                 )}
                 {state !== undefined && (
                   <div className={`health-result ${state.state}`} role="status">

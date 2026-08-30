@@ -259,6 +259,17 @@ export interface AgentRequest extends Omit<RequestContext, "model"> {
   permissions: AgentPermissions;
 }
 
+export type AgentEvent =
+  | { type: "start"; requestId: string; agent: ModelRef; workspace: string }
+  | { type: "session"; sessionId: string }
+  | { type: "text-delta"; delta: string }
+  | { type: "reasoning-delta"; delta: string }
+  | { type: "command"; command: string; status: string; output?: string }
+  | { type: "file-change"; path: string; kind: string }
+  | { type: "warning"; code: string; message: string }
+  | { type: "usage"; usage: Usage }
+  | { type: "finish"; reason: FinishReason; usage?: Usage };
+
 export interface ContractEnvelope<T extends JsonValue = JsonValue> {
   contractVersion: typeof CONTRACT_VERSION;
   kind:

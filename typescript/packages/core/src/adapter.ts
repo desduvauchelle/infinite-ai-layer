@@ -1,4 +1,6 @@
 import type {
+  AgentEvent,
+  AgentRequest,
   ConnectionInfo,
   EmbeddingRequest,
   EmbeddingResult,
@@ -12,6 +14,12 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from "./types.js";
+
+export interface AgentAdapter {
+  readonly connection: ConnectionInfo;
+  health(): Promise<HealthResult>;
+  runAgent(request: AgentRequest): AsyncIterable<AgentEvent>;
+}
 
 export interface ProviderAdapter {
   readonly connection: ConnectionInfo;

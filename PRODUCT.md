@@ -28,7 +28,7 @@ The included proof application has a conversation list, a focused chat workspace
 
 - Rust and TypeScript must expose contract-equivalent requests, stream events, errors, usage, and cost metadata.
 - Version 0.1 covers health, model listing, text generation and streaming, structured output, tool-call transport, embeddings, and transcription contracts.
-- Rust additionally supports explicit Codex CLI agent execution.
+- Rust and Node.js TypeScript additionally support explicit Codex and Claude Code CLI agent execution.
 - Connections are explicitly registered; the SDK does not scan, install, start, or authenticate providers.
 - The SDK is stateless and performs no automatic provider routing or fallback.
 - Host applications own persistence, tool execution, model preferences, vector indexes, consent, and workflows.

@@ -32,7 +32,7 @@ Final package names and the open-source license can remain provisional during de
 | 4     | Cloud text adapters and gateway switching                    | Complete       |
 | 5     | Structured output and host-controlled tool calls             | Alpha complete |
 | 6     | Embeddings and transcription                                 | Alpha complete |
-| 7     | Codex CLI text and agent execution in Rust                   | Alpha complete |
+| 7     | Codex and Claude Code CLI text and agent execution           | Alpha complete |
 | 8     | Hardening, public extension kit, docs, and release candidate | In progress    |
 | 9     | Standalone chat and configuration application                | Complete       |
 | 10    | Apple-native and deferred media capabilities                 | Deferred       |
@@ -300,15 +300,15 @@ Complete the non-agent v0.1 capability set.
 - Both languages produce equivalent normalized results for the same mocked provider responses.
 - At least one live opt-in transcription smoke test succeeds in each implementation.
 
-## 10. Phase 7 — Codex CLI and native agent execution
+## 10. Phase 7 — Terminal CLI and native agent execution
 
 ### Objective
 
-Add the native-only terminal adapter without weakening the safety or statelessness of regular inference.
+Add native terminal adapters without weakening the safety or statelessness of regular inference.
 
 ### Work
 
-- Verify the current official Codex CLI non-interactive and structured-output interfaces before implementation.
+- Verify the current official Codex and Claude Code CLI non-interactive and structured-output interfaces before implementation.
 - Create a separate Rust agent adapter package.
 - Add explicit executable-path configuration; do not scan the machine.
 - Add version probing and a published compatibility range.

@@ -18,8 +18,10 @@ import {
   OpenAICompatibleAdapter,
   type OpenAICompatibleKind,
 } from "@infinite-ai/providers";
+import { ClaudeCliAdapter, CodexCliAdapter } from "@infinite-ai/agents";
 
-type ConnectionKind = "mock" | "ollama" | OpenAICompatibleKind;
+type ConnectionKind =
+  "mock" | "ollama" | "codex-cli" | "claude-cli" | OpenAICompatibleKind;
 
 interface ConnectionConfig {
   id: string;
@@ -28,6 +30,9 @@ interface ConnectionConfig {
   boundary: DataBoundary;
   baseUrl?: string;
   apiKey?: string;
+  executable?: string;
+  workspace?: string;
+  modelId?: string;
 }
 
 const mockConfig: ConnectionConfig = {
@@ -110,6 +115,8 @@ function configFrom(value: unknown): ConnectionConfig {
       "lm-studio",
       "llama-cpp",
       "custom",
+      "codex-cli",
+      "claude-cli",
     ].includes(kind)
   ) {
     throw new AiError("invalid-request", "Unsupported provider kind.");
@@ -134,10 +141,24 @@ function configFrom(value: unknown): ConnectionConfig {
     typeof input.apiKey === "string" && input.apiKey.trim() !== ""
       ? input.apiKey.trim()
       : undefined;
+  const executable =
+    typeof input.executable === "string" && input.executable.trim() !== ""
+      ? input.executable.trim()
+      : undefined;
+  const workspace =
+    typeof input.workspace === "string" && input.workspace.trim() !== ""
+      ? input.workspace.trim()
+      : undefined;
+  const modelId =
+    typeof input.modelId === "string" && input.modelId.trim() !== ""
+      ? input.modelId.trim()
+      : undefined;
   if (
     kind !== "ollama" &&
     kind !== "lm-studio" &&
     kind !== "llama-cpp" &&
+    kind !== "codex-cli" &&
+    kind !== "claude-cli" &&
     apiKey === undefined
   )
     throw new AiError(
@@ -151,12 +172,16 @@ function configFrom(value: unknown): ConnectionConfig {
     boundary,
     ...(baseUrl === undefined ? {} : { baseUrl }),
     ...(apiKey === undefined ? {} : { apiKey }),
+    ...(executable === undefined ? {} : { executable }),
+    ...(workspace === undefined ? {} : { workspace }),
+    ...(modelId === undefined ? {} : { modelId }),
   };
 }
 
 function adapterFrom(
   config: ConnectionConfig,
-): OllamaAdapter | OpenAICompatibleAdapter {
+):
+  OllamaAdapter | OpenAICompatibleAdapter | CodexCliAdapter | ClaudeCliAdapter {
   if (config.kind === "ollama") {
     return new OllamaAdapter({
       id: config.id,
@@ -170,6 +195,32 @@ function adapterFrom(
       "invalid-request",
       "The built-in demo connection cannot be replaced.",
     );
+  if (config.kind === "codex-cli")
+    return new CodexCliAdapter({
+      id: config.id,
+      label: config.label,
+      boundary: config.boundary,
+      ...(config.executable === undefined
+        ? {}
+        : { executable: config.executable }),
+      ...(config.workspace === undefined
+        ? {}
+        : { workspace: config.workspace }),
+      ...(config.modelId === undefined ? {} : { modelId: config.modelId }),
+    });
+  if (config.kind === "claude-cli")
+    return new ClaudeCliAdapter({
+      id: config.id,
+      label: config.label,
+      boundary: config.boundary,
+      ...(config.executable === undefined
+        ? {}
+        : { executable: config.executable }),
+      ...(config.workspace === undefined
+        ? {}
+        : { workspace: config.workspace }),
+      ...(config.modelId === undefined ? {} : { modelId: config.modelId }),
+    });
   return new OpenAICompatibleAdapter({
     id: config.id,
     kind: config.kind,
@@ -191,6 +242,11 @@ function publicConnection(config: ConnectionConfig): Record<string, unknown> {
     boundary: config.boundary,
     hasCredential: config.apiKey !== undefined,
     ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
+    ...(config.executable === undefined
+      ? {}
+      : { executable: config.executable }),
+    ...(config.workspace === undefined ? {} : { workspace: config.workspace }),
+    ...(config.modelId === undefined ? {} : { modelId: config.modelId }),
     capabilities: connection?.capabilities ?? [],
   };
 }
@@ -306,6 +362,15 @@ async function handle(
         signal: controller.signal,
         timeoutMs: 120_000,
         maximumBoundary,
+        ...(configs.get(connectionId)?.workspace === undefined
+          ? {}
+          : {
+              providerOptions: {
+                [configs.get(connectionId)!.kind]: {
+                  workspace: configs.get(connectionId)!.workspace!,
+                },
+              },
+            }),
       })) {
         response.write(`data: ${JSON.stringify(event)}\n\n`);
       }

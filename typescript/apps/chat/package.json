@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@infinite-ai/agents": "workspace:*",
     "@infinite-ai/core": "workspace:*",
     "@infinite-ai/providers": "workspace:*",
     "lucide-react": "^0.468.0",

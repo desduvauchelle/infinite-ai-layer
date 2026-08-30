@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "build:sdk": "pnpm --filter @infinite-ai/core build && pnpm --filter @infinite-ai/providers build",
+    "build:sdk": "pnpm --filter @infinite-ai/core build && pnpm --filter @infinite-ai/providers build && pnpm --filter @infinite-ai/agents build",
     "build": "pnpm -r --if-present build && cargo build --workspace",
     "check": "pnpm typecheck && pnpm test && pnpm format:check && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     "dev": "pnpm build:sdk && pnpm --filter @infinite-ai/chat-demo dev",

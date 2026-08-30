@@ -494,7 +494,8 @@ The core project guarantees only officially maintained adapters. Community adapt
 | ----------------------- | -----------------------: | -------------: | --------------- | -------------------------------------------------------------------------------------------- |
 | Ollama                  |                 Required |       Required | Local HTTP      | Health, models, text, streaming, embeddings where model supports them                        |
 | OpenAI API              |                 Required |       Required | Cloud HTTP      | Models where available, text, streaming, structured output, tools, embeddings, transcription |
-| Codex CLI               |                 Required | Not applicable | Native terminal | Read-only text mode plus explicit agent execution                                            |
+| Codex CLI               |                 Required |       Required | Native terminal | Read-only text mode plus explicit agent execution                                            |
+| Claude Code CLI         |                 Required |       Required | Native terminal | Read-only text mode plus explicit agent execution                                            |
 | OpenRouter              | Planned after core proof |       Required | Cloud HTTP      | Capability-dependent gateway access                                                          |
 | Vercel AI Gateway       | Planned after core proof |       Required | Cloud HTTP      | Capability-dependent gateway access                                                          |
 | Apple Foundation Models |                  Planned | Not applicable | Apple native    | Text, streaming, structured output, tools, supported multimodal input                        |
@@ -562,7 +563,7 @@ Exit criterion: Rust and TypeScript decode and validate the same fixtures identi
 ### Milestone 1 — Text vertical slice
 
 - Implement registration, health, model listing, `generateText`, and `streamText`.
-- Rust adapters: Ollama, OpenAI, Codex CLI read-only text mode.
+- Rust adapters: Ollama, OpenAI, Codex CLI, and Claude Code CLI read-only text mode.
 - TypeScript adapters: Ollama, OpenAI, OpenRouter, Vercel AI Gateway.
 - Normalize cancellation, partial failures, errors, usage, and cost.
 
@@ -587,7 +588,7 @@ Exit criterion: both languages return contract-equivalent metadata, errors, and 
 ### Milestone 4 — Native agent execution
 
 - Implement explicit workspace and permission policies.
-- Add Codex CLI compatibility checks, cancellation, streaming, sessions, and redaction.
+- Add Codex and Claude Code CLI compatibility checks, cancellation, streaming, sessions, and redaction.
 - Prohibit automatic retries.
 
 Exit criterion: macOS agent tests demonstrate read-only defaults, explicit editing permission, safe cancellation, and clear incompatible-version errors.
@@ -612,7 +613,7 @@ Exit criterion: capability-gated native operations pass platform-specific confor
 
 Version 0.1 is complete only when all applicable tests pass:
 
-1. On macOS, a Rust host explicitly registers Ollama, OpenAI, and Codex CLI connections without automatic scanning.
+1. On macOS, a host explicitly registers Ollama, OpenAI, Codex CLI, and Claude Code CLI connections without automatic scanning.
 2. The host manually selects a connection and model before each request.
 3. Ollama, OpenAI, and Codex read-only text requests emit the normalized stream contract.
 4. `runAgent` requires an explicit workspace and is read-only unless stronger permissions are explicitly supplied.

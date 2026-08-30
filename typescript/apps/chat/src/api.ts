@@ -13,7 +13,9 @@ export type ConnectionKind =
   | "vercel-ai-gateway"
   | "lm-studio"
   | "llama-cpp"
-  | "custom";
+  | "custom"
+  | "codex-cli"
+  | "claude-cli";
 
 export interface ConnectionSummary {
   id: string;
@@ -23,6 +25,9 @@ export interface ConnectionSummary {
   baseUrl?: string;
   hasCredential: boolean;
   capabilities: string[];
+  executable?: string;
+  workspace?: string;
+  modelId?: string;
 }
 
 export interface ConnectionInput {
@@ -32,6 +37,9 @@ export interface ConnectionInput {
   boundary: DataBoundary;
   baseUrl?: string;
   apiKey?: string;
+  executable?: string;
+  workspace?: string;
+  modelId?: string;
 }
 
 export interface ChatInput {

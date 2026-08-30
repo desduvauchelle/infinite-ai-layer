@@ -166,15 +166,16 @@ ai.register(Arc::new(OpenAiCompatibleAdapter::openrouter(
 
 Rust exposes the same normalized operations as `generate_text`, `stream_text`, `generate_object`, `embed`, and `transcribe`.
 
-## Codex CLI agent execution in Rust
+## Codex and Claude Code CLI agent execution in Rust
 
 ```rust,no_run
 use futures_util::StreamExt;
-use infinite_ai_agents::CodexCliAdapter;
+use infinite_ai_agents::{ClaudeCliAdapter, CodexCliAdapter};
 use infinite_ai_core::{AgentAdapter, AgentPermissions, AgentRequest, DataBoundary, ModelRef};
 
 # async fn inspect() -> Result<(), infinite_ai_core::AiError> {
 let codex = CodexCliAdapter::new("codex");
+let claude = ClaudeCliAdapter::new("claude");
 let mut request = AgentRequest::new(
     ModelRef {
         connection_id: "codex".into(),
@@ -195,3 +196,5 @@ while let Some(event) = events.next().await {
 ```
 
 The CLI must already be installed and authenticated by the user. The adapter does not install it, extract credentials, or bypass its permissions.
+
+Both adapters implement the same `AgentAdapter` contract. Change the adapter and `connection_id` to use Claude Code. They also implement the regular provider text interface in read-only mode. Set the text request workspace through the namespaced `provider_options["codex-cli"].workspace` or `provider_options["claude-cli"].workspace` value.

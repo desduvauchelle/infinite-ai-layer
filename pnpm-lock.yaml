@@ -19,6 +19,9 @@ importers:
 
   typescript/apps/chat:
     dependencies:
+      "@infinite-ai/agents":
+        specifier: workspace:*
+        version: link:../../packages/agents
       "@infinite-ai/core":
         specifier: workspace:*
         version: link:../../packages/core
@@ -68,6 +71,22 @@ importers:
       vite:
         specifier: ^7.1.3
         version: 7.3.6(@types/node@24.13.3)(tsx@4.23.12)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jsdom@26.1.0(supports-color@8.1.1))(supports-color@8.1.1)(tsx@4.23.12)
+
+  typescript/packages/agents:
+    dependencies:
+      "@infinite-ai/core":
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      "@types/node":
+        specifier: ^24.3.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
       vitest:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.13.3)(jsdom@26.1.0(supports-color@8.1.1))(supports-color@8.1.1)(tsx@4.23.12)
